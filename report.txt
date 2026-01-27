@@ -1,0 +1,312 @@
+Report: Project Status and Integration Plan (v2)
+
+  Executive Summary
+
+  The project has progressed significantly. The `agent-g.py` file now contains a well-defined structure for the RL agent and its network. The core task is now to **integrate this agent with the `control.py` environment** and implement the final training logic (experience replay). This updated report provides a corrected guide for this integration.
+
+  Project Status Analysis
+
+  **✓ Completed**
+   * **Phase 1: Environment Setup**: The SUMO simulation in `control.py` works and can extract basic state and reward information.
+   * **Phase 2 (Partial): RL Agent Structure**: `agent-g.py` now defines the `TrafficLightDQN` neural network and a `TrafficLightAgent` wrapper. The agent includes methods for action selection and federated learning hooks (`get_weights`/`set_weights`).
+
+  **! Missing Components**
+
+   1. **State Vector Mismatch**: The agent in `agent-g.py` expects a **12-dimensional state vector**, but the `get_state()` function in `control.py` currently only provides a **4-dimensional vector** (queue lengths). This is a critical integration blocker that must be resolved.
+
+   2. **Agent Training Logic**: The `TrafficLightAgent` is missing the core learning components:
+      * An **experience replay buffer**.
+      * A `remember()` method to store transitions (`state`, `action`, `reward`, `next_state`).
+      * The `train_step()` method is an empty placeholder. It needs to be implemented to sample from the replay buffer and train the `TrafficLightDQN` model.
+
+   3. **Exploration Strategy**: The current `select_action` method is purely greedy (it always chooses the best-known action). For the agent to learn effectively, it needs an exploration mechanism, such as **epsilon-greedy**, to sometimes choose random actions and discover better strategies.
+
+---
+
+  Integration Guide: Connecting the RL Brain with SUMO
+
+  This guide details how to modify your codebase to integrate the new agent.
+
+  ### Step 1 (CRITICAL): Align the State Space in `control.py`
+
+  You must modify the `get_state()` function in `control.py` to produce the 12-dimensional state vector that `TrafficLightAgent` expects.
+
+  ```python
+  # In control.py, you must expand get_state()
+
+  def get_state():
+      """
+      MUST be updated to return a 12-element numpy array as defined in agent-g.py
+      """
+      # 1. Get queue lengths (current implementation)
+      north_queue = traci.edge.getLastStepHaltingNumber("E2_J1")
+      south_queue = traci.edge.getLastStepHaltingNumber("E0_J1")
+      east_queue = traci.edge.getLastStepHaltingNumber("E3_J1")
+      west_queue = traci.edge.getLastStepHaltingNumber("E1_J1")
+
+      # 2. Get waiting times (NEW)
+      north_wait = traci.edge.getWaitingTime("E2_J1")
+      south_wait = traci.edge.getWaitingTime("E0_J1")
+      east_wait = traci.edge.getWaitingTime("E3_J1")
+      west_wait = traci.edge.getWaitingTime("E1_J1")
+
+      # 3. Get phase info (NEW)
+      current_phase = traci.trafficlight.getPhase('J1')
+      # You need to map SUMO's phase index to your agent's (0 or 1)
+      is_ns_green = 1 if current_phase in [0, 1] else 0 # Example logic
+      
+      # 4. Get other metrics (NEW - requires more logic)
+      time_in_phase = 0 # You'll need to track this manually
+      is_yellow = 1 if current_phase in [1, 3] else 0 # Example logic
+      bias = 1.0 # Bias term
+
+      return np.array([
+          north_queue, south_queue, east_queue, west_queue,
+          north_wait, south_wait, east_wait, west_west,
+          is_ns_green,
+          time_in_phase,
+          is_yellow,
+          bias
+      ])
+  ```
+
+  ### Step 2: Modify `control.py` to Use the Agent
+
+  1.  **Import and Instantiate `TrafficLightAgent`**:
+
+    ```python
+    # At the top of control.py
+    from agent_g import TrafficLightAgent # Correct class to import
+    import numpy as np
+    
+    # ... other imports ...
+
+    def run():
+        # Instantiate the correct agent
+        agent = TrafficLightAgent(state_dim=12, action_dim=2)
+        # ... rest of the setup ...
+    ```
+
+   2. **Update the Main Simulation Loop**: The loop must be modified to use the agent for decisions and to call its (yet-to-be-implemented) training methods.
+
+    ```python
+    # Inside the run() function in control.py, replace the existing loop
+
+    step = 0
+    # The main learning loop
+    while step < 5000:
+        traci.simulationStep()
+
+        # 1. GET STATE (using your new 12-dim function)
+        current_state = get_state()
+
+        # 2. CHOOSE ACTION from Agent
+        # NOTE: Add epsilon-greedy logic here for exploration
+        if np.random.rand() <= epsilon:
+             action = np.random.choice([0, 1])
+        else:
+             action = agent.select_action(current_state)
+
+        # 3. PERFORM ACTION in SUMO
+        if action == 1: # Action 1: Switch to the next phase
+            current_phase = traci.trafficlight.getPhase('J1')
+            next_phase = (current_phase + 2) % 4
+            traci.trafficlight.setPhase('J1', next_phase)
+            # Run simulation for a fixed duration for the new phase
+            for _ in range(10):
+                if step < 5000:
+                    traci.simulationStep()
+                    step += 1
+
+        # 4. OBSERVE REWARD and NEXT STATE
+        reward = get_reward()
+        next_state = get_state()
+        
+        # 5. STORE EXPERIENCE (Logic to be added to agent)
+        # agent.remember(current_state, action, reward, next_state)
+
+        # 6. TRAIN THE AGENT (Logic to be added to agent)
+        # agent.train_step() 
+
+        print(f"Step: {step}, Action: {action}, Reward: {reward}")
+        step += 1
+
+    traci.close()
+    ```
+---
+
+### **Project Q&A**
+
+Here are answers to your specific questions:
+
+**1. How is the SUMO traffic simulated now?**
+
+The simulation is run by the **SUMO (Simulation of Urban MObility)** engine. Your `control.py` script launches it using the `hello.sumocfg` file, which defines all the components:
+*   **Network**: A 4-way intersection defined in `hello.net.xml`.
+*   **Traffic**: Cars, buses, and motorcycles with predefined routes, loaded from `hello.rou.xml`.
+Currently, the simulation is **passive**. The `control.py` script steps through time and reads data, but the traffic lights are following a simple, pre-defined cycle. No intelligent agent is in control yet.
+
+**2. What type of RL model are we using?**
+
+You are using a **Deep Q-Network (DQN)**. Specifically:
+*   **Model**: The `TrafficLightDQN` class in `agent-g.py` defines the neural network. It's a standard feed-forward network with three linear layers.
+*   **Input**: It's designed to take the 12-dimensional state vector.
+*   **Output**: It outputs Q-values for the two possible actions: `0` (Keep Phase) and `1` (Switch Phase).
+*   **Agent**: The `TrafficLightAgent` class acts as a wrapper around this DQN, managing the model and providing an interface for the simulation to use.
+
+**3. After integration, what and how to run and what results will we get?**
+
+*   **How to Run**: You will run the experiment the exact same way you do now: `python control.py`.
+*   **What Happens**: After implementing the integration steps, this command will launch a full RL training loop. Instead of just watching a passive simulation, the `TrafficLightAgent` will actively make decisions to control the traffic lights based on the state it observes.
+*   **Expected Results**:
+    *   **Console Output**: You will see the `Step`, `Action`, and `Reward` printed for each cycle.
+    *   **Initial Performance**: The agent will start by making random, inefficient decisions. Expect high negative rewards (long waiting times) at the beginning. This is normal.
+    *   **Learning Curve**: As the simulation progresses, the agent will learn from its experience. You should see the `Reward` value gradually trend upwards (become less negative). Plotting the reward over time is the best way to visualize this learning curve.
+    *   **Final Outcome**: The process will produce a trained model that can manage traffic more efficiently than the default, fixed-time controller. You should add logic to save your trained model weights periodically.
+
+**4. What about Member 3 and Federated Learning? When and how does that come into place?**
+
+This is **Phase 3** of your project and is the "Federated" part of "Federated Reinforcement Learning".
+
+*   **When**: You should only start this *after* you have a single agent learning successfully on its own (i.e., after you have fully completed the integration guide and can prove one agent is getting better over time).
+
+*   **How**: The process will use the **Flower (flwr)** library and the `get_weights`/`set_weights` methods already in your `TrafficLightAgent`. The architecture will be:
+    1.  **Flower Server**: A new, separate Python script that starts a Flower server.
+    2.  **Multiple Clients**: You will run multiple `control.py` instances. Each one will act as a separate "robot" (or traffic intersection). You will need to wrap the training logic in a Flower `Client` class.
+    3.  **Training Process**:
+        *   The server starts.
+        *   Multiple clients connect.
+        *   Each client trains its own agent locally for a few episodes on its own SUMO data.
+        *   Each client sends its updated model weights (via `get_weights`) to the server.
+        *   The server averages the weights from all clients to create an improved "global model".
+        *   The server sends this global model back to all clients.
+        *   Each client updates its local model with these new, improved weights (via `set_weights`).
+        *   This cycle repeats, allowing all agents to learn from the collective experience without ever sharing their raw, private traffic data.
+---
+
+### **Phase 2 Results: Analysis and Next Steps**
+
+Congratulations on successfully running the training script! Here is an analysis of the results and the answers to your questions.
+
+**1. About `dqn_traffic_model.pth`**
+
+*   **What is it?** This file **is your trained agent's "brain."** It contains all the learned weights and biases of the `TrafficLightDQN` neural network, saved in a PyTorch-specific format. You can't open it with a text editor.
+*   **How do I use it?** You load these weights back into the model to use your trained agent without having to retrain it every time. Here is a code snippet showing how you would load the weights into a new agent instance:
+    ```python
+    # Example of loading the model for inference
+    from agent import TrafficLightAgent
+    import torch
+
+    # 1. Create a new agent instance
+    agent = TrafficLightAgent(state_dim=12, action_dim=2)
+
+    # 2. Load the saved weights from the file
+    agent.model.load_state_dict(torch.load("dqn_traffic_model.pth"))
+
+    # 3. Set the model to evaluation mode
+    agent.model.eval()
+
+    # Now you can use agent.select_action(state, epsilon=0) to get decisions
+    # from your fully trained agent without any randomness.
+    ```
+
+**2. Analysis of the Results**
+
+The results from your first training run are **very promising**. They show clear evidence of learning.
+
+*   **Reward (Blue Line on Plot):** The reward is your main performance metric (higher is better). The plot shows that while the rewards are very noisy from one episode to the next (which is normal for RL), there is a **clear upward trend**. You started with rewards around -11,000 and ended with episodes peaking near -8,000. This is a significant improvement and proves your agent is learning to reduce vehicle wait times.
+*   **Loss (Red Line on Plot):** The loss indicates how "surprised" the agent is by the outcomes of its actions. The sharp drop at the beginning is excellent, showing it quickly learned the basics. The subsequent fluctuations are normal as the agent explores and refines its strategy. As long as the loss doesn't explode, this pattern is acceptable.
+
+**Conclusion:** Phase 2 is a success. You have a learning agent. The agent has not fully converged yet (the rewards are still unstable), but this is expected after only 50 episodes.
+
+**3. Next Steps**
+
+1.  **Continue Training:** The most important next step is to **train for more episodes**. The agent is still exploring (epsilon was ~0.78 at the end).
+    *   **Action:** In `control.py`, change `num_episodes` from `50` to `200` and run the script again. This will allow the reward to stabilize and epsilon to decrease further, resulting in a more expert agent.
+
+2.  **Evaluate the Trained Agent:** You need to see how well the trained agent performs on its own.
+    *   **Action:** Create a new script named `evaluate.py`. This script should be a simplified version of `control.py`. It should load the saved `dqn_traffic_model.pth` (using the code snippet above) and run the simulation for one long episode with `epsilon` set to `0`. This will show you the agent making decisions purely based on what it has learned.
+
+3.  **Prepare for Phase 3 (Federated Learning):** Once you have a well-trained single agent, you are ready to move on to the federated learning aspect with Member 3.
+    *   **Action:** Review the Flower documentation's "Quickstart PyTorch" example. Your goal will be to modify `control.py` to act as a Flower "client" and to create a new, separate "server" script. The existing `get_weights` and `set_weights` functions in your agent are the key to this process.
+---
+
+### **Project Update: Restructuring and Finalization**
+
+This section summarizes the latest changes made to improve the project's organization and speed.
+
+**1. Project Restructuring**
+
+To make the project cleaner and more scalable, the file structure has been reorganized:
+*   `src/`: Now contains all Python source code (`agent.py`, `control.py`, `evaluate.py`).
+*   `sumo_config/`: Now contains all SUMO-specific files (`.xml`, `.sumocfg`).
+*   `results/`: Will store all output artifacts, such as saved models (`.pth`) and plots (`.png`).
+All scripts have been updated to use the new relative paths, so the commands in the `README.md` will work correctly.
+
+**2. Faster Training**
+
+The simulation delay has been set to `0` in `sumo_config/hello.sumocfg`. This will make the simulation run at maximum speed, which is ideal for training the agent in the background when you don't need to watch it visually.
+
+**3. New Evaluation Script**
+
+A new script, `src/evaluate.py`, has been created. After you have trained your agent using `src/control.py`, you can use this new script to see your trained agent in action with no randomness.
+
+**4. On the Number of Training Episodes (200 vs. more)**
+
+You asked if you can train for more than 200 episodes. **Yes, absolutely.**
+
+*   **Why 200?** 200 was suggested as the immediate next step because the initial run of 50 episodes showed a clear learning trend but had not yet stabilized. 200 episodes is a reasonable number to expect a more stable, well-behaved learning curve.
+*   **Can you go further?** Yes. The goal is to train until the **reward plateaus**. Look at the `training_progress.png` plot. When the blue reward line stops showing a clear upward trend and just bounces around a stable average, you can consider the agent fully trained. This might happen at 300, 500, or even 1000+ episodes. There is no magic number; you train as long as the agent is still improving.
+
+This completes the requested code and project structure changes. You are now set up for more efficient training and evaluation.
+---
+
+### **Final Project Enhancements**
+
+This final section details the last round of changes to improve organization and logging.
+
+**1. Dedicated Models and Logs Folders**
+
+To further clean up the project root, two new directories have been created:
+*   `models/`: This folder will now store the trained PyTorch model files (`.pth`).
+*   `logs/`: This folder will automatically capture the full terminal output of every training run.
+
+**2. Automatic Run Logging**
+
+The main training script, `src/control.py`, has been upgraded with a logging system. When you run it, it will now:
+1.  Automatically create a new log file in the `logs/` directory (e.g., `run_1.log`, `run_2.log`, etc.).
+2.  Save all the text that appears in your terminal during that run into this file.
+
+This provides a complete and permanent history of each training session's parameters and results, which is invaluable for tracking progress and debugging. The `evaluate.py` script has also been updated to load the model from its new location in the `models/` folder.
+---
+
+### **Phase 2.5: Training Stability and Final Results**
+
+This section analyzes the results from the 200-episode training run after implementing key stabilization techniques in the agent.
+
+**1. Analysis of Stabilized Training**
+
+The changes made to the `agent.py` script (switching to Huber Loss and adding gradient clipping) were a major success.
+*   **Stable Loss:** The most important outcome is that the loss curve (red line) is now stable. It drops quickly and remains low and controlled throughout training. This is a sign of a healthy and robust learning process, confirming that the previous instability is resolved.
+*   **Consistent Reward Improvement:** With a stable foundation, the agent's performance improved significantly. The reward curve (blue line) shows a much clearer and more consistent upward trend, reaching a new best reward of **-5692**. This is a dramatic improvement over the initial runs and proves the agent is learning an effective policy.
+
+**Conclusion:** The single-agent training phase is now successfully complete. You have a stable, learning agent and a solid baseline for performance.
+
+**2. Final Next Steps: Handover to Phase 3**
+
+The project is now ready to transition to **Phase 3: Federated Learning**. The team member responsible for this phase (Member 3, "The Architect") can now begin their work. Here is a recommended plan:
+
+1.  **Establish a Baseline:** Run the evaluation script (`python src/evaluate.py`) on the latest model (`models/dqn_traffic_model.pth`). The final reward from this run will serve as the official **single-agent baseline**. The goal of federated learning will be to see if multiple agents, learning together, can outperform this single agent's score.
+
+2.  **Review Flower Quickstart:** The architect should work through the official [Flower Quickstart with PyTorch](https://flower.dev/docs/framework/tutorial-quickstart-pytorch.html). This will provide the fundamental concepts for the next step.
+
+3.  **Adapt for Federated Learning:** The project needs to be adapted to the Flower framework.
+    *   **Create `server.py`:** A new script that will start the Flower server (`fl.server.start_server`). It will define the `FedAvg` strategy and specify how many clients to wait for.
+    *   **Create `client.py`:** This script will adapt your existing `control.py` logic into a Flower `NumPyClient`.
+        *   The `__init__` will still set up the SUMO environment and the `TrafficLightAgent`.
+        *   `get_parameters` will call `agent.get_weights()`.
+        *   `set_parameters` will call `agent.set_weights()`.
+        *   `fit` will contain the main training loop from `control.py`, running for a few *local* episodes before returning the updated weights to the server.
+    *   **Launch:** The final step will be to start the `server.py` script, and then start multiple instances of the `client.py` script, each representing a different traffic intersection learning in parallel.
+
+This concludes the single-agent development phase. The project is in an excellent state to begin the exciting work of federated learning.

@@ -8,6 +8,9 @@
         <begin value="0"/>
         <end value="1000"/>
     </time>
+    <processing>
+        <delay value="0"/>
+    </processing>
     <gui_only>
         <gui-settings-file value="hello.view.xml"/>
     </gui_only>
