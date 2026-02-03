@@ -1,0 +1,15 @@
+Simulator Started for experiment: stage1_speed_variation on cpu
+Episode 1/10 | Reward: -9181.00 | Avg Loss: 22.7596 | Epsilon: 0.995
+Episode 2/10 | Reward: -12508.00 | Avg Loss: 7.6995 | Epsilon: 0.990
+Episode 3/10 | Reward: -10575.00 | Avg Loss: 5.5225 | Epsilon: 0.985
+Episode 4/10 | Reward: -11136.00 | Avg Loss: 4.6077 | Epsilon: 0.980
+Episode 5/10 | Reward: -12563.00 | Avg Loss: 4.0691 | Epsilon: 0.975
+Episode 6/10 | Reward: -10888.00 | Avg Loss: 3.8044 | Epsilon: 0.970
+Episode 7/10 | Reward: -9829.00 | Avg Loss: 3.7193 | Epsilon: 0.966
+Episode 8/10 | Reward: -11904.00 | Avg Loss: 3.6251 | Epsilon: 0.961
+Episode 9/10 | Reward: -11212.00 | Avg Loss: 3.5968 | Epsilon: 0.956
+Episode 10/10 | Reward: -11722.00 | Avg Loss: 3.5509 | Epsilon: 0.951
+
+Model saved to E:\Projects\FedLearning-Robotics\models\stage1_speed_variation\dqn_traffic_model.pth
+
+Training plot saved to E:\Projects\FedLearning-Robotics\results\stage1_speed_variation\training_progress.png

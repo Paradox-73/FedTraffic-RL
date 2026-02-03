@@ -1,0 +1,55 @@
+Simulator Started for experiment: stage0_baseline on cpu
+Episode 1/50 | Reward: -9003.00 | Avg Loss: 21.9837 | Epsilon: 0.995
+Episode 2/50 | Reward: -12732.00 | Avg Loss: 7.9017 | Epsilon: 0.990
+Episode 3/50 | Reward: -8103.00 | Avg Loss: 5.6992 | Epsilon: 0.985
+Episode 4/50 | Reward: -2691.00 | Avg Loss: 4.4381 | Epsilon: 0.980
+Episode 5/50 | Reward: 0.00 | Avg Loss: 3.3344 | Epsilon: 0.975
+Episode 6/50 | Reward: 0.00 | Avg Loss: 2.4396 | Epsilon: 0.970
+Episode 7/50 | Reward: 0.00 | Avg Loss: 2.0600 | Epsilon: 0.966
+Episode 8/50 | Reward: 0.00 | Avg Loss: 1.7146 | Epsilon: 0.961
+Episode 9/50 | Reward: 0.00 | Avg Loss: 1.4387 | Epsilon: 0.956
+Episode 10/50 | Reward: 0.00 | Avg Loss: 1.2987 | Epsilon: 0.951
+Episode 11/50 | Reward: 0.00 | Avg Loss: 3.7099 | Epsilon: 0.946
+Episode 12/50 | Reward: 0.00 | Avg Loss: 2.1107 | Epsilon: 0.942
+Episode 13/50 | Reward: 0.00 | Avg Loss: 1.8305 | Epsilon: 0.937
+Episode 14/50 | Reward: 0.00 | Avg Loss: 1.6521 | Epsilon: 0.932
+Episode 15/50 | Reward: 0.00 | Avg Loss: 1.5611 | Epsilon: 0.928
+Episode 16/50 | Reward: 0.00 | Avg Loss: 1.4324 | Epsilon: 0.923
+Episode 17/50 | Reward: 0.00 | Avg Loss: 1.3253 | Epsilon: 0.918
+Episode 18/50 | Reward: 0.00 | Avg Loss: 1.2048 | Epsilon: 0.914
+Episode 19/50 | Reward: 0.00 | Avg Loss: 1.1791 | Epsilon: 0.909
+Episode 20/50 | Reward: 0.00 | Avg Loss: 1.0637 | Epsilon: 0.905
+Episode 21/50 | Reward: 0.00 | Avg Loss: 2.0085 | Epsilon: 0.900
+Episode 22/50 | Reward: 0.00 | Avg Loss: 1.4935 | Epsilon: 0.896
+Episode 23/50 | Reward: 0.00 | Avg Loss: 1.3600 | Epsilon: 0.891
+Episode 24/50 | Reward: 0.00 | Avg Loss: 1.3066 | Epsilon: 0.887
+Episode 25/50 | Reward: 0.00 | Avg Loss: 1.2401 | Epsilon: 0.882
+Episode 26/50 | Reward: 0.00 | Avg Loss: 1.1500 | Epsilon: 0.878
+Episode 27/50 | Reward: 0.00 | Avg Loss: 1.0517 | Epsilon: 0.873
+Episode 28/50 | Reward: 0.00 | Avg Loss: 1.0493 | Epsilon: 0.869
+Episode 29/50 | Reward: 0.00 | Avg Loss: 1.0092 | Epsilon: 0.865
+Episode 30/50 | Reward: 0.00 | Avg Loss: 0.9507 | Epsilon: 0.860
+Episode 31/50 | Reward: 0.00 | Avg Loss: 1.4298 | Epsilon: 0.856
+Episode 32/50 | Reward: 0.00 | Avg Loss: 1.2074 | Epsilon: 0.852
+Episode 33/50 | Reward: 0.00 | Avg Loss: 1.1648 | Epsilon: 0.848
+Episode 34/50 | Reward: 0.00 | Avg Loss: 1.1211 | Epsilon: 0.843
+Episode 35/50 | Reward: 0.00 | Avg Loss: 0.8190 | Epsilon: 0.839
+Episode 36/50 | Reward: 0.00 | Avg Loss: 0.4691 | Epsilon: 0.835
+Episode 37/50 | Reward: 0.00 | Avg Loss: 0.1645 | Epsilon: 0.831
+Episode 38/50 | Reward: 0.00 | Avg Loss: 0.0042 | Epsilon: 0.827
+Episode 39/50 | Reward: 0.00 | Avg Loss: 0.0002 | Epsilon: 0.822
+Episode 40/50 | Reward: 0.00 | Avg Loss: 0.0001 | Epsilon: 0.818
+Episode 41/50 | Reward: 0.00 | Avg Loss: 0.0002 | Epsilon: 0.814
+Episode 42/50 | Reward: 0.00 | Avg Loss: 0.0001 | Epsilon: 0.810
+Episode 43/50 | Reward: 0.00 | Avg Loss: 0.0001 | Epsilon: 0.806
+Episode 44/50 | Reward: 0.00 | Avg Loss: 0.0001 | Epsilon: 0.802
+Episode 45/50 | Reward: 0.00 | Avg Loss: 0.0001 | Epsilon: 0.798
+Episode 46/50 | Reward: 0.00 | Avg Loss: 0.0001 | Epsilon: 0.794
+Episode 47/50 | Reward: 0.00 | Avg Loss: 0.0001 | Epsilon: 0.790
+Episode 48/50 | Reward: 0.00 | Avg Loss: 0.0002 | Epsilon: 0.786
+Episode 49/50 | Reward: 0.00 | Avg Loss: 0.0001 | Epsilon: 0.782
+Episode 50/50 | Reward: 0.00 | Avg Loss: 0.0001 | Epsilon: 0.778
+
+Model saved to E:\Projects\FedLearning-Robotics\models\stage0_baseline\dqn_traffic_model.pth
+
+Training plot saved to E:\Projects\FedLearning-Robotics\results\stage0_baseline\training_progress.png

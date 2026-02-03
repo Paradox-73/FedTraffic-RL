@@ -60,15 +60,48 @@ To ensure the agent learns effectively and stably, several key DQN enhancements 
 1.  Install **SUMO** and set the `SUMO_HOME` environment variable.
 2.  Install Python dependencies: `pip install -r requirements.txt`
 
-### Step 1: Train a New Agent
-To start the training process, run `control.py`. This will launch the SUMO GUI and begin the 200-episode training loop. All terminal output will be saved to a new file in the `logs/` directory.
+### Running Experiments
+
+This project is structured around a series of experiments, each with a different traffic scenario. You can run a specific experiment or all of them sequentially.
+
+**To run a single experiment:**
+
+Use the `--experiment` flag followed by the experiment's name. The experiment names correspond to the directories in `sumo_config/`.
+
+```bash
+# Example: Run the "stage4_unbalanced_flows" experiment
+python src/control.py --experiment "stage4_unbalanced_flows"
+```
+
+**To run all experiments:**
+
+To execute all stages from `stage0_baseline` to `stage7_total_chaos` in one go, use `all`.
+
+```bash
+python src/control.py --experiment all
+```
+
+### Output Files
+
+The script saves the output for each experiment in a dedicated subdirectory named after the experiment:
+-   **Logs:** `logs/<experiment_name>/run_X.log`
+-   **Models:** `models/<experiment_name>/dqn_traffic_model.pth`
+-   **Result Plots:** `results/<experiment_name>/training_progress.png`
+
+### Basic Usage: Training and Evaluation
+
+If you run the control script without any flags, it will default to running the `stage0_baseline` experiment.
+
+#### Step 1: Train the Baseline Agent
 ```bash
 python src/control.py
 ```
+This command trains the agent on the baseline scenario and saves the model, plot, and log in their respective `stage0_baseline` subdirectories.
 
-### Step 2: Evaluate the Trained Agent
-After training is complete, a `dqn_traffic_model.pth` file will be saved in the `models/` directory. You can then evaluate its performance without any random exploration:
+#### Step 2: Evaluate the Trained Agent
+To evaluate a trained model, you can use the `evaluate.py` script. **Note:** You will need to modify `evaluate.py` to point it to the specific model file you wish to test (e.g., `models/stage4_unbalanced_flows/dqn_traffic_model.pth`).
 ```bash
+# First, update the model path inside src/evaluate.py, then run:
 python src/evaluate.py
 ```
 
@@ -77,9 +110,19 @@ After training, a `training_progress.png` file is saved in the `results/` folder
 -   **Total Reward (Blue Line):** This is the most important metric. An upward trend indicates the agent is getting better at its job (minimizing wait times). The goal is to see this curve climb as high as possible (i.e., as close to zero as possible) and then plateau.
 -   **Average Loss (Red Line):** This shows how "wrong" the agent's predictions are. A good loss curve will drop sharply at the beginning and then remain low and stable. The previous instability was fixed, and the current loss curve demonstrates a healthy learning process.
 
-**Latest Training Results (200 Episodes):**
+---
+
+## 6. Baseline Performance (200-Episode Run)
+
+The initial 200-episode training run serves as the first baseline for this project.
+
+- **Configuration:** The agent was trained on the default traffic scenario defined in `sumo_config/hello.rou.xml`.
+- **Result:** The agent demonstrated successful learning, improving its performance (total reward) from approximately **-11,000** at the start of training to a peak score of **-5692**.
+- **Analysis:** The reward curve shows a clear upward trend, proving the DQN approach is viable. The loss curve, while showing a slight upward creep, is stable enough to serve as a solid foundation for future experiments.
 
 ![Training Progress](results/training_progress.png)
 
-## 6. Next Steps: Phase 3 (Federated Learning)
+---
+
+## 7. Next Steps: Phase 3 (Federated Learning)
 With a stable and effective single agent, the project is now ready for the final phase: federated learning. This involves adapting the training script to run as a **Flower client** and creating a central **Flower server** to orchestrate the learning process across multiple, independent agents.

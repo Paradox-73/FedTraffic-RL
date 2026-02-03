@@ -310,3 +310,169 @@ The project is now ready to transition to **Phase 3: Federated Learning**. The t
     *   **Launch:** The final step will be to start the `server.py` script, and then start multiple instances of the `client.py` script, each representing a different traffic intersection learning in parallel.
 
 This concludes the single-agent development phase. The project is in an excellent state to begin the exciting work of federated learning.
+
+---
+
+
+
+### **In-Depth Analysis of SUMO Configuration**
+
+
+
+This analysis provides a detailed, value-by-value explanation of the SUMO simulation files, addressing your observations and questions.
+
+
+
+---
+
+
+
+### **1. Core Issue: Why Vehicles Only Go Straight**
+
+
+
+You are correct: vehicles are only moving in straight lines. My previous analysis was flawed. Here is the reason:
+
+
+
+*   **The Network vs. The Routes:** The network file (`hello.net.xml`) correctly defines a road system where turns *are possible*. However, the routes file (`hello.rou.xml`) which defines the *actual traffic*, **only contains routes for straight-through movements**.
+
+
+
+    ```xml
+
+    <!-- In hello.rou.xml -->
+
+    <route id="route_NS" edges="edge_N_in edge_S_out"/> <!-- Straight N->S -->
+
+    <route id="route_SN" edges="edge_S_in edge_N_out"/> <!-- Straight S->N -->
+
+    <route id="route_EW" edges="edge_E_in edge_W_out"/> <!-- Straight E->W -->
+
+    <route id="route_WE" edges="edge_W_in edge_E_out"/> <!-- Straight W->E -->
+
+    ```
+
+
+
+*   **Conclusion:** The simulation is behaving as designed by the routes file. To see turning vehicles, you would need to add new routes that involve turns, for example:
+
+
+
+    ```xml
+
+    <!-- Example of a new route for a North-to-East left turn -->
+
+    <route id="route_NE_left" edges="edge_N_in edge_E_out"/>
+
+    <!-- And a flow to generate vehicles for this new route -->
+
+    <flow id="f_NE_left" type="mixed_traffic" route="route_NE_left" begin="0" end="1000" period="10"/>
+
+    ```
+
+    Adding this would introduce vehicles that turn left, creating a more complex problem for your RL agent to solve.
+
+
+
+---
+
+
+
+### **2. Deep Dive into Configuration Files**
+
+
+
+Here is the detailed breakdown of what the files contain, why the values are what they are, and how changing them affects the simulation.
+
+
+
+#### **`hello.rou.xml` (Traffic Demand)**
+
+
+
+*   **What it is:** This file defines the "demand" side of the simulation: what kinds of vehicles exist and what journeys they take. It is the most direct way to control the traffic your agent will face.
+
+
+
+*   **Detailed Breakdown & Impact of Changes:**
+
+    *   `<vTypeDistribution id="mixed_traffic">`:
+
+        *   **Why:** Instead of defining one type of vehicle, this creates a realistic mix.
+
+        *   **Impact:** Changing the `probability` of different `vType` elements directly alters the traffic composition. Increasing the `probability` for `bus` to `0.5` would make half the vehicles large and slow-accelerating, significantly increasing congestion and queue lengths for the same number of vehicles.
+
+    *   `<flow id="f_NS" ... period="3">`:
+
+        *   **Why `period="3"`?** This value dictates vehicle arrival rates. `period="3"` means SUMO attempts to introduce a new vehicle for this flow every 3 seconds, creating a high-density traffic situation.
+
+        *   **Impact:** This is a critical parameter for controlling difficulty. Changing `period` to `"10"` would drastically reduce traffic from the North, making the agent's job easier. Changing it to `"1"` would create extreme, likely unsolvable, congestion.
+
+    *   `<flow id="f_NS" ... end="1000">`:
+
+        *   **Why `end="1000"`?** This defines how long vehicles are generated. It creates a finite "rush hour" scenario. Combined with `<end>` in `hello.sumocfg`, it ensures the simulation has a clear beginning and end.
+
+        *   **Impact:** If you set `end` to a value greater than the simulation end time in `.sumocfg`, you get continuous traffic generation for the whole simulation.
+
+
+
+#### **`hello.net.xml` (The Road Network)**
+
+
+
+*   **What it is:** This is the "brain" of the road network, compiled from the simpler `.nod.xml` and `.edg.xml` files. It contains the absolute, low-level ground truth of the simulation world: every lane's geometry, every speed limit, and every traffic rule. **You should almost never edit this file directly.**
+
+
+
+*   **Detailed Breakdown & Impact of Changes:**
+
+    *   `<tlLogic id="J1" type="static" ...>`:
+
+        *   **Why `type="static"`?** This specifies a fixed-time controller. The logic inside this tag will loop forever without any input.
+
+        *   **Impact:** For your project, this `<tlLogic>` block is what your Python agent code overrides at every step. While your Python code is running, this static logic is effectively ignored. However, if your script fails, SUMO will fall back to this predictable behavior.
+
+    *   `<phase duration="42" state="GGggrrrrGGggrrrr"/>`:
+
+        *   **Why `duration="42"`?** This is the fixed green time for this phase. The total cycle time is (42+3) + (42+3) = 90 seconds, a common traffic light cycle length.
+
+        *   **Why the `state` string?** This 16-character string is a bitmap. Each character maps to a specific `linkIndex` (a potential movement) at the junction. `G`=Green, `g`=Green (yield), `r`=Red. This specific string allows North-South traffic (`GGgg`) and their right turns (`GGgg`) to proceed while all East-West movements are stopped (`rrrr`).
+
+        *   **Impact:** Modifying this `state` string incorrectly is the easiest way to cause accidents. For example, changing it to `"GGggrrrrGGggrrrrG"` (if it were long enough) could allow a conflicting movement, and SUMO would throw errors or show collisions.
+
+    *   `<connection from="edge_N_in" to="edge_E_out" ... linkIndex="2">`:
+
+        *   **Why:** This defines a specific legal path. It declares that a vehicle on the incoming North edge (`edge_N_in`) is allowed to move to the outgoing East edge (`edge_E_out`), which is a left turn.
+
+        *   **Why `linkIndex="2"`?** This assigns the movement to the 3rd character (index 2) of the `state` string in `<tlLogic>`. In the phase `"GGggrrrrGGggrrrr"`, the 3rd character is `g`, meaning this left turn is permitted but must yield.
+
+        *   **Impact:** Removing a `<connection>` element would make that movement illegal. Vehicles attempting that route would get stuck, and SUMO would report a teleport error.
+
+
+
+#### **`hello.nod.xml` & `hello.edg.xml` (Network Blueprints)**
+
+
+
+*   **What they are:** These are the human-readable blueprints for the network. You define your intersections (`nodes`) and the roads connecting them (`edges`), and the `netconvert` tool builds the complex `hello.net.xml` file from them.
+
+
+
+*   **Detailed Breakdown & Impact of Changes:**
+
+    *   `<node id="J1" ... type="traffic_light"/>`:
+
+        *   **Why:** This tells `netconvert` to generate the complex junction logic (`tlLogic`, `request` matrix, etc.) required for a signalized intersection.
+
+        *   **Impact:** If you changed this to `type="priority"`, `netconvert` would build a junction where `edge_N_in` and `edge_S_in` have right-of-way over the E-W roads, and no traffic lights would be generated.
+
+    *   `<edge id="edge_N_in" ... speed="13.89">`:
+
+        *   **Why `13.89`?** This is precisely 50 km/h converted to meters/second. It's a standard and realistic speed for an urban arterial road.
+
+        *   **Impact:** Changing this value changes the free-flow travel time on that road segment. A lower speed limit would cause vehicles to approach the junction more slowly, potentially changing queue dynamics.
+
+
+
+This more detailed explanation should clarify the purpose and interaction of the configuration files.

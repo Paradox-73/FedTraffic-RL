@@ -1,0 +1,15 @@
+Simulator Started for experiment: stage2_physics_variation on cpu
+Episode 1/10 | Reward: -8774.00 | Avg Loss: 21.9090 | Epsilon: 0.995
+Episode 2/10 | Reward: -11404.00 | Avg Loss: 6.7953 | Epsilon: 0.990
+Episode 3/10 | Reward: -9341.00 | Avg Loss: 5.0062 | Epsilon: 0.985
+Episode 4/10 | Reward: -10724.00 | Avg Loss: 4.3004 | Epsilon: 0.980
+Episode 5/10 | Reward: -11258.00 | Avg Loss: 4.0398 | Epsilon: 0.975
+Episode 6/10 | Reward: -9836.00 | Avg Loss: 3.7908 | Epsilon: 0.970
+Episode 7/10 | Reward: -8990.00 | Avg Loss: 3.6812 | Epsilon: 0.966
+Episode 8/10 | Reward: -11301.00 | Avg Loss: 3.5448 | Epsilon: 0.961
+Episode 9/10 | Reward: -10127.00 | Avg Loss: 3.5022 | Epsilon: 0.956
+Episode 10/10 | Reward: -10474.00 | Avg Loss: 3.4416 | Epsilon: 0.951
+
+Model saved to E:\Projects\FedLearning-Robotics\models\stage2_physics_variation\dqn_traffic_model.pth
+
+Training plot saved to E:\Projects\FedLearning-Robotics\results\stage2_physics_variation\training_progress.png
