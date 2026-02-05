@@ -1,0 +1,2 @@
+Simulator Started for experiment: stage1_baseline on cpu
+Fatal error: start() got an unexpected keyword argument 'stderr'

@@ -1,17 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<configuration>
+
+<!-- generated on 2026-02-05T00:02:39.473006+05:30 by Eclipse SUMO GUI 1.25.0
+-->
+
+<sumoConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/sumoConfiguration.xsd">
+
     <input>
         <net-file value="hello.net.xml"/>
         <route-files value="hello.rou.xml"/>
+        <additional-files value="hello.view.xml"/>
     </input>
+
     <time>
         <begin value="0"/>
         <end value="1000"/>
     </time>
-    <processing>
-        <delay value="0"/>
-    </processing>
+
     <gui_only>
-        <gui-settings-file value="hello.view.xml"/>
+        <start value="true"/>
     </gui_only>
-</configuration>
+
+</sumoConfiguration>

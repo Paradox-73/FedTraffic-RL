@@ -1,0 +1,5 @@
+Simulator Started for experiment: stage1_baseline on cpu
+C:\Program Files (x86)\Eclipse\Sumo\tools\traci\main.py:156: UserWarning: Could not connect to TraCI server using port 54356 (TraCI server already finished). Retrying with different port.
+  warnings.warn(("Could not connect to TraCI server using port %s (%s)." +
+C:\Program Files (x86)\Eclipse\Sumo\tools\traci\main.py:156: UserWarning: Could not connect to TraCI server using port 54360 (TraCI server already finished). Retrying with different port.
+  warnings.warn(("Could not connect to TraCI server using port %s (%s)." +

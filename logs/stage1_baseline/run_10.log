@@ -1,0 +1,5 @@
+Simulator Started for experiment: stage1_baseline on cpu
+Episode 1/200 | Reward: -166.54 | Loss: 0.0025 | Eps: 0.995
+Episode 2/200 | Reward: -154.21 | Loss: 0.0010 | Eps: 0.990
+Episode 3/200 | Reward: -172.42 | Loss: 0.0009 | Eps: 0.985
+Episode 4/200 | Reward: -130.54 | Loss: 0.0009 | Eps: 0.980

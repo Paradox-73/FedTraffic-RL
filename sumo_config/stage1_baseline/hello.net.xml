@@ -1,0 +1,4 @@
+<tlLogic id="J1" type="static" programID="sumo" offset="0">
+    <phase duration="30" state="GGrrrrGGrrrr"/>
+    <phase duration="30" state="rrrGGrrrrGGr"/>
+</tlLogic>

@@ -1,0 +1,6 @@
+Simulator Started for experiment: stage3_gridlock on cpu
+Episode 1/200 | Reward: -514.63 | Loss: 0.0101 | Eps: 0.995
+Episode 2/200 | Reward: -661.93 | Loss: 0.0057 | Eps: 0.990
+Episode 3/200 | Reward: -459.41 | Loss: 0.0054 | Eps: 0.985
+Episode 4/200 | Reward: -548.89 | Loss: 0.0053 | Eps: 0.980
+Episode 5/200 | Reward: -869.64 | Loss: 0.0056 | Eps: 0.975

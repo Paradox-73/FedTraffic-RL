@@ -1,6 +1,0 @@
-Simulator Started for experiment: stage7_total_chaos on cpu
-Episode 1/200 | Reward: -8751.00 | Avg Loss: 17.7099 | Epsilon: 0.995
-
-An unexpected error occurred in episode 2: Connection closed by SUMO.
-
-An unexpected error occurred during experiment setup: Connection closed by SUMO.

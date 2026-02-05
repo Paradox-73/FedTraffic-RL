@@ -1,5 +1,0 @@
-Simulator Started for experiment: stage2_physics_variation on cpu
-
-An unexpected error occurred in episode 1: float() argument must be a string or a real number, not 'list'
-
-An unexpected error occurred during experiment setup: Received answer 127 for command 139.

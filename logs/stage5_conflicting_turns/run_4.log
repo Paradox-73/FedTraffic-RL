@@ -1,3 +1,0 @@
-Simulator Started for experiment: stage5_conflicting_turns on cpu
-
-An unexpected error occurred: 'SimulationDomain' object has no attribute 'load'
