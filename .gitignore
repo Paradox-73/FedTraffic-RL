@@ -1,8 +1,96 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+.env
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# SUMO-specific
+*.sumocfg.backup
+*.net.xml.backup
+*.nod.xml.backup
+*.edg.xml.backup
+*.rou.xml.backup
+
+# Generated logs and outputs
+logs/
+results/
+*.log
+*.out
+
+# Project-specific files
 robo/
-report.txt
 models/
-experiment_plan.md 
-log.md
-plan.md 
 report.txt
+experiment_plan.md
+log.md
+plan.md
 rl_report.md
+
+# OS specific
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.orig
+
+# IDE specific Python files
+.pylintrc
+.flake8
+
+# Runtime files
+.cache/
