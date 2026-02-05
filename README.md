@@ -36,14 +36,14 @@ FedLearning-Robotics/
 
     **State Space (15-dim):**
     The agent sees the intersection through:
-    *   Queue Lengths: Number of halted vehicles on N, S, E, W arms.
-    *   Waiting Times: Cumulative wait time per arm.
-    *   Pressure: The density difference (Incoming - Outgoing vehicles).
-    *   Phase Info: Current phase ID and time elapsed.
+    - Queue Lengths: Number of halted vehicles on N, S, E, W arms.
+    - Waiting Times: Cumulative wait time per arm.
+    - Pressure: The density difference (Incoming - Outgoing vehicles).
+    - Phase Info: Current phase ID and time elapsed.
 
     **Action Space (Discrete):**
-    *   0: Keep current phase.
-    *   1: Switch phase.
+    - 0: Keep current phase.
+    - 1: Switch phase.
 
 2.  **The Agent (DQN)**
 
@@ -63,35 +63,38 @@ FedLearning-Robotics/
 We trained the agent on three distinct "levels" of difficulty.
 
 **Stage 1: Baseline (Standard Intersection)**
-*   **Scenario:** Moderate, balanced traffic with random volume fluctuations (+/- 10%).
-*   **Goal:** Learn basic queue clearing logic.
-*   **Result:**
-    Interpretation: The Blue Line (Reward) shows a steady upward trend, indicating the agent learned to reduce waiting times. The Red Line (Loss) decreases rapidly, showing the neural network successfully converged on a strategy.
+
+- **Scenario:** Moderate, balanced traffic with random volume fluctuations (+/- 10%).
+- **Goal:** Learn basic queue clearing logic.
+- **Result:**
+  Interpretation: The Blue Line (Reward) shows a steady upward trend, indicating the agent learned to reduce waiting times. The Red Line (Loss) decreases rapidly, showing the neural network successfully converged on a strategy.
 
 **Stage 2: Rush Hour (Non-Stationary)**
-*   **Scenario:** A realistic morning commute simulation.
-    *   0-300s: Lull (Low Traffic).
-    *   300-700s: Spike (Heavy North-South flow).
-    *   700s+: Cooldown.
-*   **Goal:** Adaptation. The agent must switch strategies mid-episode to prioritize the main artery.
-*   **Result:**
-    Interpretation: You can see a dip in rewards corresponding to the traffic spike, but the agent recovers. The consistent low loss indicates it successfully generalized the concept of "prioritization."
+
+- **Scenario:** A realistic morning commute simulation.
+  - 0-300s: Lull (Low Traffic).
+  - 300-700s: Spike (Heavy North-South flow).
+  - 700s+: Cooldown.
+- **Goal:** Adaptation. The agent must switch strategies mid-episode to prioritize the main artery.
+- **Result:**
+  Interpretation: You can see a dip in rewards corresponding to the traffic spike, but the agent recovers. The consistent low loss indicates it successfully generalized the concept of "prioritization."
 
 **Stage 3: Gridlock (High Conflict)**
-*   **Scenario:** Heavy traffic with Blocking Left Turns enabled on a single-lane road.
-*   **Goal:** Geometry Management. Left-turning cars block the lane while yielding, causing "phantom jams."
-*   **Result:**
-    Interpretation: This graph is more volatile (spiky) because physical blockages are unpredictable. However, the upward trend in reward proves the agent learned non-linear strategies to clear these blockages.
+
+- **Scenario:** Heavy traffic with Blocking Left Turns enabled on a single-lane road.
+- **Goal:** Geometry Management. Left-turning cars block the lane while yielding, causing "phantom jams."
+- **Result:**
+  Interpretation: This graph is more volatile (spiky) because physical blockages are unpredictable. However, the upward trend in reward proves the agent learned non-linear strategies to clear these blockages.
 
 ## 📈 Evaluation Performance
 
 After training for 100 episodes, we ran the agent in "Exploitation Mode" (No random actions). The metric is Total Accumulated Reward (Net change in wait time). A score close to 0 is optimal.
 
-| Experiment          | Score | Verdict                                     |
-| :------------------ | :---- | :------------------------------------------ |
-| Stage 1 (Baseline)  | -0.23 | ✅ Excellent stability.                     |
+| Experiment          | Score | Verdict                                         |
+| :------------------ | :---- | :---------------------------------------------- |
+| Stage 1 (Baseline)  | -0.23 | ✅ Excellent stability.                         |
 | Stage 2 (Rush Hour) | -0.15 | 🏆 Best Performance (Cleared queues perfectly). |
-| Stage 3 (Gridlock)  | -0.23 | ✅ Successfully prevented deadlock.         |
+| Stage 3 (Gridlock)  | -0.23 | ✅ Successfully prevented deadlock.             |
 
 ## 🚀 Phase 3: Federated Learning (Next Steps)
 
@@ -101,26 +104,31 @@ Now that we have a capable local agent, we are moving to Federated Learning usin
 In the real world, cities cannot upload raw camera feeds from every intersection to a central cloud due to Privacy and Bandwidth constraints.
 
 **The Architecture**
-*   **Local Training (Clients):** Each intersection (Client) trains its own local model on its own traffic data.
-*   **Aggregation (Server):** Clients send only their Model Weights (not data) to the server.
-*   **Federated Averaging:** The server averages the weights to create a "Global Smart Model" and sends it back to all clients.
+
+- **Local Training (Clients):** Each intersection (Client) trains its own local model on its own traffic data.
+- **Aggregation (Server):** Clients send only their Model Weights (not data) to the server.
+- **Federated Averaging:** The server averages the weights to create a "Global Smart Model" and sends it back to all clients.
 
 **Implementation Plan**
-*   `src/client.py`: Wrap the existing TrafficLightAgent into a `flwr.client.NumPyClient`.
-*   `src/server.py`: Create a `flwr.server` to orchestrate the rounds.
-*   Multi-Agent Simulation: Spin up 3 parallel SUMO instances (representing 3 different intersections) and train them simultaneously.
+
+- `src/client.py`: Wrap the existing TrafficLightAgent into a `flwr.client.NumPyClient`.
+- `src/server.py`: Create a `flwr.server` to orchestrate the rounds.
+- Multi-Agent Simulation: Spin up 3 parallel SUMO instances (representing 3 different intersections) and train them simultaneously.
 
 ## 🛠️ How to Run
 
 **Prerequisites**
-*   SUMO installed and `SUMO_HOME` environment variable set.
-*   Python 3.8+
+
+- SUMO installed and `SUMO_HOME` environment variable set.
+- Python 3.8+
 
 **Dependencies:**
-*   `pip install torch numpy matplotlib traci libsumo`
+
+- `pip install -r requirements.txt`
 
 1.  **Training**
     Run the control script to start training. You can specify the experiment stage.
+
     ```bash
     # Run the Baseline
     python src/control.py --experiment stage1_baseline
