@@ -187,8 +187,6 @@ def run(experiment_name, args):
 
     sumo_config_base = os.path.normpath(os.path.join(SCRIPT_DIR, "../sumo_config"))
 
-    
-
     # Generate routes directly in the base config directory
 
     route_file_path = os.path.join(sumo_config_base, "hello.rou.xml")
