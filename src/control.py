@@ -241,7 +241,6 @@ def run(experiment_name, args):
             
             state = get_state(last_phase_time, traci.trafficlight.getPhase('J1'))
 
-            state = get_state(last_phase_time, traci.trafficlight.getPhase('J1'))
             while step < 1000:
                 current_phase_id = traci.trafficlight.getPhase('J1')
 
