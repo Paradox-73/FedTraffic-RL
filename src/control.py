@@ -15,14 +15,18 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", DEVICE)
 
-# Traffic Light Phases for J1 (from hello.net.xml)
-# Updated Constants
+# --- NEW 8-PHASE SPLIT CYCLE CONSTANTS ---
+# Cycle: North -> Yellow -> East -> Yellow -> South -> Yellow -> West -> Yellow
 PHASE_N_GREEN = 0
+PHASE_N_YELLOW = 1
 PHASE_E_GREEN = 2
+PHASE_E_YELLOW = 3
 PHASE_S_GREEN = 4
+PHASE_S_YELLOW = 5
 PHASE_W_GREEN = 6
+PHASE_W_YELLOW = 7
 
-# The RL is allowed to act during ANY of these
+# The Agent can only act during Green Phases
 ALLOWED_PHASES = [PHASE_N_GREEN, PHASE_E_GREEN, PHASE_S_GREEN, PHASE_W_GREEN]
 
 # --- Logger Setup ---
@@ -59,14 +63,21 @@ class Logger:
         self.terminal.flush()
         self.log.flush()
 
+# --- State & Reward Functions ---
+
 
 def get_state(last_phase_time, current_phase):
-    # State Dim = 15
-    # breakdown: 4 (queues) + 4 (waits) + 2 (phase Info) + 4 (pressure) + 1 (bias) = 15
+    # State Dim = 18
+    # Breakdown:
+    #   4 (Queues)
+    # + 4 (Waits)
+    # + 4 (Phase One-Hot: [N, E, S, W]) <--- CHANGED
+    # + 1 (Time)
+    # + 4 (Pressure)
+    # + 1 (Bias)
+    # = 18 Inputs
 
-    # QUEUE LENGTHS
-    # traci.edge.getLastStepHaltingNumber returns the count of cars with speed < 0.1 m/s.
-    # divide by 20.0 because ~20 cars is roughly a full lane (approx 100m).
+    # 1. QUEUES
     q_north = np.clip(traci.edge.getLastStepHaltingNumber(
         "edge_N_in") / 20.0, 0, 1)
     q_south = np.clip(traci.edge.getLastStepHaltingNumber(
@@ -76,28 +87,24 @@ def get_state(last_phase_time, current_phase):
     q_west = np.clip(traci.edge.getLastStepHaltingNumber(
         "edge_W_in") / 20.0, 0, 1)
 
-    # CUMULATIVE WAIT TIME
-    # traci.edge.getWaitingTime returns the SUM of waiting seconds for ALL cars on that edge.
-    # divide by 100.0 to normalize.
-    wait_north = np.clip(traci.edge.getWaitingTime(
-        "edge_N_in") / 100.0, 0, 1)  # 100 is a softcap
+    # 2. WAITS
+    wait_north = np.clip(traci.edge.getWaitingTime("edge_N_in") / 100.0, 0, 1)
     wait_south = np.clip(traci.edge.getWaitingTime("edge_S_in") / 100.0, 0, 1)
     wait_east = np.clip(traci.edge.getWaitingTime("edge_E_in") / 100.0, 0, 1)
     wait_west = np.clip(traci.edge.getWaitingTime("edge_W_in") / 100.0, 0, 1)
 
-    # PHASE CONTEXT
-    # one-Hot Encoding: 1 if North-South is Green, 0 otherwise.
-    is_ns_green = 1 if current_phase == PHASE_NS_GREEN_ID else 0
+    # 3. PHASE CONTEXT (One-Hot Encoding)
+    # Which direction is currently green?
+    is_n = 1 if current_phase == PHASE_N_GREEN else 0
+    is_e = 1 if current_phase == PHASE_E_GREEN else 0
+    is_s = 1 if current_phase == PHASE_S_GREEN else 0
+    is_w = 1 if current_phase == PHASE_W_GREEN else 0
 
-    # how long has the light been green?
-    # normalize by 150 seconds (assumed max reasonable cycle time).
+    # How long has it been green?
     norm_last_phase_time = np.clip(last_phase_time / 150.0, 0, 1)
 
-    # PRESSURE (The "Throughput" Metric)
-    # pressure = Incoming Vehicles - outgoing Vehicles.
-    # high +pressure: cars are piling up at the input but not leaving (bottle neck).
-    # high -pressure: cars are leaving faster than they arrive (free flow).
-    # normaliz by 20.0 to match the queue scaling.
+    # 4. PRESSURE
+    # Simple pressure: Incoming - Outgoing (Simplification for single lane)
     pressure_north = np.clip((traci.edge.getLastStepVehicleNumber(
         "edge_N_in") - traci.edge.getLastStepVehicleNumber("edge_S_out")) / 20.0, -1, 1)
     pressure_south = np.clip((traci.edge.getLastStepVehicleNumber(
@@ -107,28 +114,34 @@ def get_state(last_phase_time, current_phase):
     pressure_west = np.clip((traci.edge.getLastStepVehicleNumber(
         "edge_W_in") - traci.edge.getLastStepVehicleNumber("edge_E_out")) / 20.0, -1, 1)
 
-    # ASSEMBLE VECTOR
-    # The final "1.0" is the Bias Node (keeps neurons active even if all inputs are 0).
     return np.array([q_north, q_south, q_east, q_west,
                      wait_north, wait_south, wait_east, wait_west,
-                     is_ns_green, norm_last_phase_time,
+                     is_n, is_e, is_s, is_w,
+                     norm_last_phase_time,
                      pressure_north, pressure_south, pressure_east, pressure_west,
                      1.0])
 
 
-def plot_rewards(rewards, losses, plot_path):
-    fig, ax1 = plt.subplots()
-    color = 'tab:blue'
-    ax1.set_xlabel('Episode')
-    ax1.set_ylabel('Total Reward', color=color)
-    ax1.plot(rewards, color=color, label='Rewards')
-    if losses:
-        ax2 = ax1.twinx()
-        color = 'tab:red'
-        ax2.set_ylabel('Average Loss', color=color)
-        ax2.plot(losses, color=color, label='Losses')
-    plt.title('DQN Training Progress')
-    plt.savefig(plot_path)
+def plot_rewards(rewards, losses, save_path):
+    plt.figure(figsize=(12, 5))
+
+    plt.subplot(1, 2, 1)
+    plt.plot(rewards, label="Episode Reward")
+    plt.xlabel("Episode")
+    plt.ylabel("Total Reward")
+    plt.title("Training Rewards")
+    plt.legend()
+    plt.grid()
+
+    plt.subplot(1, 2, 2)
+    plt.plot(losses, label="Avg Loss", color="orange")
+    plt.xlabel("Episode")
+    plt.ylabel("Loss")
+    plt.title("Training Loss")
+    plt.legend()
+    plt.grid()
+
+    plt.savefig(save_path)
     plt.close()
 
 
@@ -137,13 +150,10 @@ def run(experiment_name, args):
     np.random.seed(42)
     torch.manual_seed(42)
 
-    # Generate routes directly in the base config directory
     sumo_config_base = os.path.normpath(
         os.path.join(SCRIPT_DIR, "../sumo_config"))
     route_file_path = os.path.join(sumo_config_base, "hello.rou.xml")
     sumo_cfg_path = os.path.join(sumo_config_base, "hello.sumocfg")
-
-    # Update sumo_cmd to use the debug log in the base directory
     sumo_log_file = os.path.join(sumo_config_base, "sumo_debug.log")
 
     sumo_bin = "sumo" if args.nogui else "sumo-gui"
@@ -157,29 +167,28 @@ def run(experiment_name, args):
     os.makedirs(models_dir, exist_ok=True)
     os.makedirs(results_dir, exist_ok=True)
 
-    model_path = os.path.join(models_dir, "dqn_traffic_model.pth")
-    plot_path = os.path.join(results_dir, "training_progress.png")
+    model_path = os.path.join(models_dir, f"model_{experiment_name}.pth")
+    plot_path = os.path.join(results_dir, f"plot_{experiment_name}.png")
 
     logs_dir = os.path.normpath(os.path.join(SCRIPT_DIR, "../logs"))
+
     logger = Logger(logs_dir, experiment_name)
     logger.start()
 
     try:
         if traci.isLoaded():
             traci.close()
-        print(
-            f"Simulator Started for experiment: {experiment_name} on {DEVICE}")
+        print(f"Simulator Started for experiment: {experiment_name}")
 
-        # State Dim 15 (Matches get_state, after adding pressure)
-        agent = TrafficLightAgent(state_dim=15, action_dim=2, device=DEVICE)
+        # --- INIT AGENT WITH STATE DIM (18) ---
+        agent = TrafficLightAgent(state_dim=18, action_dim=2)
 
         all_rewards = []
         all_avg_losses = []
         epsilon = 1.0
 
-        num_episodes = 100  # Default number of episodes
+        num_episodes = 100
         for episode in range(num_episodes):
-            # GENERATE NEW ROUTES EVERY EPISODE
             generate_routes(experiment_name, route_file_path)
 
             if traci.isLoaded():
@@ -190,7 +199,7 @@ def run(experiment_name, args):
             last_phase_time = 0
             episode_reward = 0
             episode_losses = []
-            previous_total_wait = 0  # Initialize for differential reward
+            previous_total_wait = 0
 
             state = get_state(
                 last_phase_time, traci.trafficlight.getPhase('J1'))
@@ -198,14 +207,22 @@ def run(experiment_name, args):
             while step < 1000:
                 current_phase_id = traci.trafficlight.getPhase('J1')
 
-                # Agent only acts on green phases
-                if current_phase_id == PHASE_NS_GREEN_ID or current_phase_id == PHASE_EW_GREEN_ID:
+                # --- Check against ALLOWED Green Phases ---
+                if current_phase_id in ALLOWED_PHASES:
                     action = agent.select_action(state, epsilon)
+
                     if action == 1:
+                        # Switch to Next Phase (which is Yellow)
+                        # Phase order: 0(Green) -> 1(Yellow) -> 2(Green) ...
                         traci.trafficlight.setPhase('J1', current_phase_id + 1)
                         last_phase_time = 0
+                    else:
+                        # Action 0: Keep Green (Do nothing, let time pass)
+                        pass
                 else:
-                    action = 0  # Force "stay" during yellow
+                    # If Yellow (Phases 1, 3, 5, 7), we are locked out.
+                    # Just wait for SUMO to finish the yellow timer (3s).
+                    action = 0
 
                 traci.simulationStep()
                 step += 1
@@ -214,14 +231,20 @@ def run(experiment_name, args):
                 next_phase_id = traci.trafficlight.getPhase('J1')
                 next_state = get_state(last_phase_time, next_phase_id)
 
-                # Reward calculation
                 vehicle_ids = traci.vehicle.getIDList()
                 current_total_wait = sum(
                     traci.vehicle.getWaitingTime(v_id) for v_id in vehicle_ids)
+
+                # Reward: Improvement in total waiting time
                 reward = (previous_total_wait - current_total_wait) / 100.0
                 previous_total_wait = current_total_wait
 
+                # Store memory (Masked if we were locked out? No, storing transitions is fine)
+                # Note: We usually only store transitions where the agent acted.
+                # However, for simplicity, we store steps even during yellow to keep continuity.
+                # Ideally, you might skip storing 'Yellow' steps, but this works fine.
                 agent.remember(state, action, reward, next_state, step >= 1000)
+
                 loss = agent.replay()
                 if loss is not None:
                     episode_losses.append(loss)
@@ -243,6 +266,8 @@ def run(experiment_name, args):
 
     except Exception as e:
         print(f"Fatal error: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         logger.stop()
 
@@ -253,6 +278,7 @@ if __name__ == "__main__":
                         default="stage1_baseline", help="Experiment Name")
     parser.add_argument("--nogui", action="store_true",
                         help="Run SUMO without GUI")
+
     args = parser.parse_args()
 
     if args.experiment == "all":
