@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 from agent import TrafficLightAgent
+from generate_routes import generate_routes
 import argparse
 import random
 import shutil
@@ -52,113 +53,47 @@ class Logger:
         self.terminal.flush()
         self.log.flush()
 
-# --- Dynamic Route Generation ---
-def generate_routes(experiment_name, output_path):
-    """
-    Generates the hello.rou.xml file.
-    """
-    header = """<?xml version="1.0" encoding="UTF-8"?>
-<routes>
-    <vTypeDistribution id="mixed_traffic">
-        <vType id="car" length="4.9" accel="2.3" maxSpeed="15.0" color="yellow" probability="0.80" speedFactor="0.96" speedDev="0.1"/>
-        <vType id="bus" length="12.0" accel="1.0" maxSpeed="10.0" color="red" probability="0.10" speedFactor="0.9"/>
-        <vType id="moto" length="2.0" accel="3.0" maxSpeed="20.0" color="blue" probability="0.10" speedFactor="1.1"/>
-    </vTypeDistribution>
-
-    <!-- Standard Routes (Straight) -->
-    <route id="NS" edges="edge_N_in edge_S_out"/>
-    <route id="SN" edges="edge_S_in edge_N_out"/>
-    <route id="EW" edges="edge_E_in edge_W_out"/>
-    <route id="WE" edges="edge_W_in edge_E_out"/>
-    
-    <!-- Turn Routes -->
-    <route id="NE" edges="edge_N_in edge_E_out"/>
-    <route id="NW" edges="edge_N_in edge_W_out"/>
-    <route id="SE" edges="edge_S_in edge_E_out"/>
-    <route id="SW" edges="edge_S_in edge_W_out"/>
-    <route id="EN" edges="edge_E_in edge_N_out"/>
-    <route id="ES" edges="edge_E_in edge_S_out"/>
-    <route id="WN" edges="edge_W_in edge_N_out"/>
-    <route id="WS" edges="edge_W_in edge_S_out"/>
-"""
-    flows = ""
-
-    if "stage1" in experiment_name:
-        # STAGE 1: Standard Intersection
-        # Moderate traffic on all sides
-        vol_scale = random.uniform(0.9, 1.1)
-        base_prob = 0.15 * vol_scale
-        
-        flows += f'<flow id="f_NS" type="mixed_traffic" route="NS" begin="0" end="1000" probability="{base_prob * 0.8}"/>\n'
-        flows += f'<flow id="f_NW" type="mixed_traffic" route="NW" begin="0" end="1000" probability="{base_prob * 0.2}"/>\n'
-        flows += f'<flow id="f_SN" type="mixed_traffic" route="SN" begin="0" end="1000" probability="{base_prob * 0.8}"/>\n'
-        flows += f'<flow id="f_SE" type="mixed_traffic" route="SE" begin="0" end="1000" probability="{base_prob * 0.2}"/>\n'
-        flows += f'<flow id="f_EW" type="mixed_traffic" route="EW" begin="0" end="1000" probability="{base_prob * 0.8}"/>\n'
-        flows += f'<flow id="f_EN" type="mixed_traffic" route="EN" begin="0" end="1000" probability="{base_prob * 0.2}"/>\n'
-        flows += f'<flow id="f_WE" type="mixed_traffic" route="WE" begin="0" end="1000" probability="{base_prob * 0.8}"/>\n'
-        flows += f'<flow id="f_WS" type="mixed_traffic" route="WS" begin="0" end="1000" probability="{base_prob * 0.2}"/>\n'
-
-    elif "stage2" in experiment_name:
-        # STAGE 2: Rush Hour - Corrected Logic
-        peak_start = random.randint(200, 400)
-        peak_end = peak_start + 400
-        
-        # 1. LULL (0 -> peak_start): Low, balanced traffic on ALL arms
-        lull_prob = 0.1
-        flows += f'<flow id="lull_NS" type="mixed_traffic" route="NS" begin="0" end="{peak_start}" probability="{lull_prob}"/>\n'
-        flows += f'<flow id="lull_SN" type="mixed_traffic" route="SN" begin="0" end="{peak_start}" probability="{lull_prob}"/>\n'
-        flows += f'<flow id="lull_EW" type="mixed_traffic" route="EW" begin="0" end="{peak_start}" probability="{lull_prob}"/>\n'
-        flows += f'<flow id="lull_WE" type="mixed_traffic" route="WE" begin="0" end="{peak_start}" probability="{lull_prob}"/>\n'
-        
-        # 2. RUSH (peak_start -> peak_end): Heavy NS, Moderate EW
-        ns_rush_prob = 0.6
-        ew_rush_prob = 0.25
-        flows += f'<flow id="rush_NS" type="mixed_traffic" route="NS" begin="{peak_start}" end="{peak_end}" probability="{ns_rush_prob}"/>\n'
-        flows += f'<flow id="rush_SN" type="mixed_traffic" route="SN" begin="{peak_start}" end="{peak_end}" probability="{ns_rush_prob}"/>\n'
-        flows += f'<flow id="rush_EW" type="mixed_traffic" route="EW" begin="{peak_start}" end="{peak_end}" probability="{ew_rush_prob}"/>\n'
-        flows += f'<flow id="rush_WE" type="mixed_traffic" route="WE" begin="{peak_start}" end="{peak_end}" probability="{ew_rush_prob}"/>\n'
-
-        # 3. COOL DOWN (peak_end -> 1000): Medium, balanced traffic
-        cool_prob = 0.2
-        flows += f'<flow id="cool_NS" type="mixed_traffic" route="NS" begin="{peak_end}" end="1000" probability="{cool_prob}"/>\n'
-        flows += f'<flow id="cool_SN" type="mixed_traffic" route="SN" begin="{peak_end}" end="1000" probability="{cool_prob}"/>\n'
-        flows += f'<flow id="cool_EW" type="mixed_traffic" route="EW" begin="{peak_end}" end="1000" probability="{cool_prob}"/>\n'
-        flows += f'<flow id="cool_WE" type="mixed_traffic" route="WE" begin="{peak_end}" end="1000" probability="{cool_prob}"/>\n'
-
-    elif "stage3" in experiment_name:
-        # STAGE 3: Downtown Gridlock
-        # High volume everywhere with Blocking Left Turns
-        prob = 0.3
-        for origin, dests in [("N", ["S", "W", "E"]), ("S", ["N", "E", "W"]), ("E", ["W", "N", "S"]), ("W", ["E", "S", "N"])]:
-            flows += f'<flow id="f_{origin}{dests[0]}" type="mixed_traffic" route="{origin}{dests[0]}" begin="0" end="1000" probability="{prob * 0.5}"/>\n'
-            flows += f'<flow id="f_{origin}{dests[1]}" type="mixed_traffic" route="{origin}{dests[1]}" begin="0" end="1000" probability="{prob * 0.25}"/>\n'
-            flows += f'<flow id="f_{origin}{dests[2]}" type="mixed_traffic" route="{origin}{dests[2]}" begin="0" end="1000" probability="{prob * 0.25}"/>\n'
-
-    with open(output_path, "w") as f:
-        f.write(header + flows + "</routes>")
-
 # --- State & Reward Functions ---
 def get_state(last_phase_time, current_phase):
-    # State Dim = 11 (No Yellow flag needed)
-    # Ensure all inputs are strictly between [0,1]
+    # State Dim = 15
+    # breakdown: 4 (queues) + 4 (waits) + 2 (phase Info) + 4 (pressure) + 1 (bias) = 15
+    
+    # QUEUE LENGTHS
+    # traci.edge.getLastStepHaltingNumber returns the count of cars with speed < 0.1 m/s.
+    # divide by 20.0 because ~20 cars is roughly a full lane (approx 100m).
     q_north = np.clip(traci.edge.getLastStepHaltingNumber("edge_N_in") / 20.0, 0, 1)
     q_south = np.clip(traci.edge.getLastStepHaltingNumber("edge_S_in") / 20.0, 0, 1)
     q_east = np.clip(traci.edge.getLastStepHaltingNumber("edge_E_in") / 20.0, 0, 1)
     q_west = np.clip(traci.edge.getLastStepHaltingNumber("edge_W_in") / 20.0, 0, 1)
-    wait_north = np.clip(traci.edge.getWaitingTime("edge_N_in") / 100.0, 0, 1)
+
+    # CUMULATIVE WAIT TIME
+    # traci.edge.getWaitingTime returns the SUM of waiting seconds for ALL cars on that edge.
+    # divide by 100.0 to normalize.
+    wait_north = np.clip(traci.edge.getWaitingTime("edge_N_in") / 100.0, 0, 1) # 100 is a softcap
     wait_south = np.clip(traci.edge.getWaitingTime("edge_S_in") / 100.0, 0, 1)
     wait_east = np.clip(traci.edge.getWaitingTime("edge_E_in") / 100.0, 0, 1)
     wait_west = np.clip(traci.edge.getWaitingTime("edge_W_in") / 100.0, 0, 1)
-    is_ns_green = 1 if current_phase == PHASE_NS_GREEN_ID else 0 # Use defined constant
+
+    # PHASE CONTEXT
+    # one-Hot Encoding: 1 if North-South is Green, 0 otherwise.
+    is_ns_green = 1 if current_phase == PHASE_NS_GREEN_ID else 0 
+    
+    # how long has the light been green?
+    # normalize by 150 seconds (assumed max reasonable cycle time).
     norm_last_phase_time = np.clip(last_phase_time / 150.0, 0, 1)
     
-    # Calculate pressure for each approach (incoming - outgoing vehicles)
-    # Normalize pressure to [-1, 1] by dividing by an assumed max (e.g., 20 vehicles)
+    # PRESSURE (The "Throughput" Metric)
+    # pressure = Incoming Vehicles - outgoing Vehicles.
+    # high +pressure: cars are piling up at the input but not leaving (bottle neck).
+    # high -pressure: cars are leaving faster than they arrive (free flow).
+    # normaliz by 20.0 to match the queue scaling.
     pressure_north = np.clip((traci.edge.getLastStepVehicleNumber("edge_N_in") - traci.edge.getLastStepVehicleNumber("edge_S_out")) / 20.0, -1, 1)
     pressure_south = np.clip((traci.edge.getLastStepVehicleNumber("edge_S_in") - traci.edge.getLastStepVehicleNumber("edge_N_out")) / 20.0, -1, 1)
     pressure_east = np.clip((traci.edge.getLastStepVehicleNumber("edge_E_in") - traci.edge.getLastStepVehicleNumber("edge_W_out")) / 20.0, -1, 1)
     pressure_west = np.clip((traci.edge.getLastStepVehicleNumber("edge_W_in") - traci.edge.getLastStepVehicleNumber("edge_E_out")) / 20.0, -1, 1)
 
+    # ASSEMBLE VECTOR
+    # The final "1.0" is the Bias Node (keeps neurons active even if all inputs are 0).
     return np.array([q_north, q_south, q_east, q_west, 
                      wait_north, wait_south, wait_east, wait_west, 
                      is_ns_green, norm_last_phase_time, 
