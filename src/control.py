@@ -13,12 +13,17 @@ import shutil
 # --- Configuration ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Using device:", DEVICE)
 
 # Traffic Light Phases for J1 (from hello.net.xml)
-PHASE_NS_GREEN_ID = 0
-PHASE_NS_YELLOW_ID = 1
-PHASE_EW_GREEN_ID = 2
-PHASE_EW_YELLOW_ID = 3
+# Updated Constants
+PHASE_N_GREEN = 0
+PHASE_E_GREEN = 2
+PHASE_S_GREEN = 4
+PHASE_W_GREEN = 6
+
+# The RL is allowed to act during ANY of these
+ALLOWED_PHASES = [PHASE_N_GREEN, PHASE_E_GREEN, PHASE_S_GREEN, PHASE_W_GREEN]
 
 # --- Logger Setup ---
 
@@ -53,8 +58,6 @@ class Logger:
     def flush(self):
         self.terminal.flush()
         self.log.flush()
-
-# --- State & Reward Functions ---
 
 
 def get_state(last_phase_time, current_phase):
