@@ -11,7 +11,11 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # --- NEW 8-PHASE SPLIT CYCLE CONSTANTS ---
-# Cycle: North -> Yellow -> East -> Yellow -> South -> Yellow -> West -> Yellow
+# Phases match the TLS program in hello.net.xml:
+#   0: North green (right/straight/left)   | 1: North yellow
+#   2: East  green                         | 3: East  yellow
+#   4: South green                         | 5: South yellow
+#   6: West  green                         | 7: West  yellow
 PHASE_N_GREEN = 0
 PHASE_N_YELLOW = 1
 PHASE_E_GREEN = 2
@@ -20,6 +24,9 @@ PHASE_S_GREEN = 4
 PHASE_S_YELLOW = 5
 PHASE_W_GREEN = 6
 PHASE_W_YELLOW = 7
+
+# The agent is only allowed to act during green phases.
+ALLOWED_PHASES = [PHASE_N_GREEN, PHASE_E_GREEN, PHASE_S_GREEN, PHASE_W_GREEN]
 
 def get_state(last_phase_time, current_phase):
     # State Dim = 18
@@ -94,8 +101,8 @@ def run_evaluation(experiment_name, nogui):
 
     print(f"Loading model: {model_path}")
 
-    # Initialize Agent with State Dim 15
-    agent = TrafficLightAgent(state_dim=15, action_dim=2, device=DEVICE)
+    # Same state/action space that was used during training (includes turning traffic)
+    agent = TrafficLightAgent(state_dim=18, action_dim=2, device=DEVICE)
     try:
         agent.model.load_state_dict(torch.load(model_path, map_location=DEVICE))
         agent.model.eval()
@@ -122,12 +129,13 @@ def run_evaluation(experiment_name, nogui):
         while step < 1000:
             current_phase_id = traci.trafficlight.getPhase('J1')
 
-            # Agent only acts on green phases
-            if current_phase_id == PHASE_NS_GREEN_ID or current_phase_id == PHASE_EW_GREEN_ID:
+            # Agent only acts on green phases (turns included in TLS definition)
+            if current_phase_id in ALLOWED_PHASES:
                 # Epsilon 0.0 means purely greedy (exploitation)
                 action = agent.select_action(state, epsilon=0.0)
 
                 if action == 1:
+                    # Move to the yellow phase for the same approach
                     traci.trafficlight.setPhase('J1', current_phase_id + 1)
                     last_phase_time = 0
             else:
