@@ -31,7 +31,6 @@ ALLOWED_PHASES = [PHASE_N_GREEN, PHASE_E_GREEN, PHASE_S_GREEN, PHASE_W_GREEN]
 
 # --- Logger Setup ---
 
-
 class Logger:
     def __init__(self, log_dir, experiment_name):
         self.terminal = sys.stdout
@@ -64,7 +63,6 @@ class Logger:
         self.log.flush()
 
 # --- State & Reward Functions ---
-
 
 def get_state(last_phase_time, current_phase):
     # State Dim = 18
@@ -120,7 +118,6 @@ def get_state(last_phase_time, current_phase):
                      norm_last_phase_time,
                      pressure_north, pressure_south, pressure_east, pressure_west,
                      1.0])
-
 
 def plot_rewards(rewards, losses, save_path):
     plt.figure(figsize=(12, 5))
