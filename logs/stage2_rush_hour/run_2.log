@@ -1,6 +1,0 @@
-Simulator Started for experiment: stage2_rush_hour on cpu
-Episode 1/200 | Reward: -5.12 | Loss: 0.0001 | Eps: 0.995
-Episode 2/200 | Reward: -3.62 | Loss: 0.0000 | Eps: 0.990
-Episode 3/200 | Reward: -3.54 | Loss: 0.0000 | Eps: 0.985
-Episode 4/200 | Reward: -3.40 | Loss: 0.0000 | Eps: 0.980
-Episode 5/200 | Reward: -6.53 | Loss: 0.0000 | Eps: 0.975

@@ -2,17 +2,16 @@
 <routes>
     <vTypeDistribution id="mixed_traffic">
         <vType id="car" length="4.9" accel="2.3" maxSpeed="15.0" color="yellow" probability="0.80" speedFactor="0.96" speedDev="0.1"/>
+
         <vType id="bus" length="12.0" accel="1.0" maxSpeed="10.0" color="red" probability="0.10" speedFactor="0.9"/>
+
         <vType id="moto" length="2.0" accel="3.0" maxSpeed="20.0" color="blue" probability="0.10" speedFactor="1.1"/>
     </vTypeDistribution>
 
-    <!-- Standard Routes (Straight) -->
     <route id="NS" edges="edge_N_in edge_S_out"/>
     <route id="SN" edges="edge_S_in edge_N_out"/>
     <route id="EW" edges="edge_E_in edge_W_out"/>
     <route id="WE" edges="edge_W_in edge_E_out"/>
-    
-    <!-- Turn Routes -->
     <route id="NE" edges="edge_N_in edge_E_out"/>
     <route id="NW" edges="edge_N_in edge_W_out"/>
     <route id="SE" edges="edge_S_in edge_E_out"/>

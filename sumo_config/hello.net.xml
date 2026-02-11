@@ -130,10 +130,17 @@
     </edge>
 
     <tlLogic id="J1" type="static" programID="0" offset="0">
-        <phase duration="39" state="GGggrrrrGGggrrrr"/>
-        <phase duration="3"  state="yyyyrrrryyyyrrrr"/>
-        <phase duration="39" state="rrrrGGggrrrrGGgg"/>
-        <phase duration="3"  state="rrrryyyyrrrryyyy"/>
+        <phase duration="30" state="GGGGrrrrrrrrrrrr"/>
+        <phase duration="3"  state="yyyyrrrrrrrrrrrr"/>
+        
+        <phase duration="30" state="rrrrGGGGrrrrrrrr"/>
+        <phase duration="3"  state="rrrryyyyrrrrrrrr"/>
+        
+        <phase duration="30" state="rrrrrrrrGGGGrrrr"/>
+        <phase duration="3"  state="rrrrrrrryyyyrrrr"/>
+        
+        <phase duration="30" state="rrrrrrrrrrrrGGGG"/>
+        <phase duration="3"  state="rrrrrrrrrrrryyyy"/>
     </tlLogic>
 
     <junction id="E" type="priority" x="200.00" y="100.00" incLanes="edge_E_out_0" intLanes=":E_0_0" shape="200.00,100.00 200.00,96.80 200.00,100.00">
