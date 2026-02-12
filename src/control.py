@@ -31,6 +31,7 @@ ALLOWED_PHASES = [PHASE_N_GREEN, PHASE_E_GREEN, PHASE_S_GREEN, PHASE_W_GREEN]
 
 # --- Logger Setup ---
 
+
 class Logger:
     def __init__(self, log_dir, experiment_name):
         self.terminal = sys.stdout
@@ -45,7 +46,7 @@ class Logger:
         self.original_stderr = sys.stderr
 
     def start(self):
-        print(f"Terminal output saved to: {self.log_file_path}")
+        print(f"Terminal output also saved to: {self.log_file_path}")
         sys.stdout = self
         sys.stderr = self
 
@@ -63,6 +64,7 @@ class Logger:
         self.log.flush()
 
 # --- State & Reward Functions ---
+
 
 def get_state(last_phase_time, current_phase):
     # State Dim = 18
@@ -119,6 +121,7 @@ def get_state(last_phase_time, current_phase):
                      pressure_north, pressure_south, pressure_east, pressure_west,
                      1.0])
 
+
 def plot_rewards(rewards, losses, save_path):
     plt.figure(figsize=(12, 5))
 
@@ -140,6 +143,7 @@ def plot_rewards(rewards, losses, save_path):
 
     plt.savefig(save_path)
     plt.close()
+    print(f"Plot saved to: {save_path}")
 
 
 def run(experiment_name, args):
@@ -155,7 +159,7 @@ def run(experiment_name, args):
 
     sumo_bin = "sumo" if args.nogui else "sumo-gui"
     sumo_cmd = [sumo_bin, "-c", sumo_cfg_path, "--start", "--quit-on-end",
-                "--no-warnings", "--log", sumo_log_file, "--error-log", sumo_log_file]
+                "--no-warnings", "--no-step-log", "--log", sumo_log_file, "--error-log", sumo_log_file]
 
     models_dir = os.path.normpath(os.path.join(
         SCRIPT_DIR, f"../models/{experiment_name}"))
@@ -175,7 +179,7 @@ def run(experiment_name, args):
     try:
         if traci.isLoaded():
             traci.close()
-        print(f"Simulator Started for experiment: {experiment_name}")
+        print(f"Starting experiment: {experiment_name}")
 
         # --- INIT AGENT WITH STATE DIM (18) ---
         agent = TrafficLightAgent(state_dim=18, action_dim=2)
@@ -255,10 +259,13 @@ def run(experiment_name, args):
             avg_loss = np.mean(episode_losses) if episode_losses else 0
             all_rewards.append(episode_reward)
             all_avg_losses.append(avg_loss)
-            print(
-                f"Episode {episode+1}/{num_episodes} | Reward: {episode_reward:.2f} | Loss: {avg_loss:.4f} | Eps: {epsilon:.3f}")
+            print(f"  Episode {episode+1}/{num_episodes} | "
+                  f"Reward: {episode_reward:7.2f} | "
+                  f"Loss: {avg_loss:7.4f} | "
+                  f"Epsilon: {epsilon:5.3f}")
 
         torch.save(agent.model.state_dict(), model_path)
+        print(f"Model saved to: {model_path}")
         plot_rewards(all_rewards, all_avg_losses, plot_path)
 
     except Exception as e:
@@ -281,7 +288,7 @@ if __name__ == "__main__":
     if args.experiment == "all":
         stages = ["stage1_baseline", "stage2_rush_hour", "stage3_gridlock"]
         for stage in stages:
-            print(f"\n🚀 STARTING EXPERIMENT: {stage} 🚀")
+            print(f"\nSTARTING EXPERIMENT: {stage}")
             run(stage, args)
     else:
         run(args.experiment, args)
