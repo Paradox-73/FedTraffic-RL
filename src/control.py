@@ -148,6 +148,22 @@ def plot_rewards(rewards, losses, save_path):
     print(f"Plot saved to: {save_path}")
 
 
+def plot_waits_comparison(waits_rl, waits_baseline, save_path):
+    """Plot per-step total waiting time for RL vs fixed schedule."""
+    steps = range(len(waits_rl))
+    plt.figure(figsize=(12, 5))
+    plt.plot(steps, waits_rl, label="RL Model", color="tab:blue")
+    plt.plot(steps, waits_baseline, label="Fixed 90s Baseline", color="tab:orange")
+    plt.xlabel("Simulation Step")
+    plt.ylabel("Total Waiting Time (s)")
+    plt.title("Intersection Performance: RL vs Fixed Cycle")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+
+
 def run(experiment_name, args):
     random.seed(42)
     np.random.seed(42)
