@@ -29,7 +29,7 @@ PHASE_W_YELLOW = 7
 # The Agent can only act during Green Phases
 ALLOWED_PHASES = [PHASE_N_GREEN, PHASE_E_GREEN, PHASE_S_GREEN, PHASE_W_GREEN]
 
-NUM_OF_EPISODES = 1000
+NUM_OF_EPISODES = 400
 
 # --- Logger Setup ---
 
@@ -153,7 +153,8 @@ def plot_waits_comparison(waits_rl, waits_baseline, save_path):
     steps = range(len(waits_rl))
     plt.figure(figsize=(12, 5))
     plt.plot(steps, waits_rl, label="RL Model", color="tab:blue")
-    plt.plot(steps, waits_baseline, label="Fixed 90s Baseline", color="tab:orange")
+    plt.plot(steps, waits_baseline,
+             label="Fixed 90s Baseline", color="tab:orange")
     plt.xlabel("Simulation Step")
     plt.ylabel("Total Waiting Time (s)")
     plt.title("Intersection Performance: RL vs Fixed Cycle")

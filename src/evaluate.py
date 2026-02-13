@@ -3,188 +3,234 @@ import sys
 import os
 import numpy as np
 import torch
-from agent import TrafficLightAgent
-import argparse
 import matplotlib.pyplot as plt
+import argparse
+from agent import TrafficLightAgent
+from generate_routes import generate_routes
 
 # --- Configuration ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Traffic Light Phases for J1
-PHASE_NS_GREEN_ID = 0
-PHASE_NS_YELLOW_ID = 1
-PHASE_EW_GREEN_ID = 2
-PHASE_EW_YELLOW_ID = 3
+# --- NEW 8-PHASE SPLIT CYCLE CONSTANTS (from control.py) ---
+PHASE_N_GREEN = 0
+PHASE_N_YELLOW = 1
+PHASE_E_GREEN = 2
+PHASE_E_YELLOW = 3
+PHASE_S_GREEN = 4
+PHASE_S_YELLOW = 5
+PHASE_W_GREEN = 6
+PHASE_W_YELLOW = 7
 
-# Fixed baseline: 90 s green each phase, 3 s yellow
-BASELINE_GREEN = 90
-BASELINE_YELLOW = 3
+# The Agent can only act during Green Phases
+ALLOWED_PHASES = [PHASE_N_GREEN, PHASE_E_GREEN, PHASE_S_GREEN, PHASE_W_GREEN]
 
+# Fixed baseline: 30s green for each of the 4 approaches
+BASELINE_GREEN_TIME = 30
+YELLOW_TIME = 3  # sumo default is 3s
+
+# --- State Function (Exact replica from control.py) ---
 def get_state(last_phase_time, current_phase):
-    """
-    Exact replica of the get_state function from control.py
-    State Dim = 15
-    """
-    # Standard Queue and Waiting times
+    # State Dim = 18
     q_north = np.clip(traci.edge.getLastStepHaltingNumber("edge_N_in") / 20.0, 0, 1)
     q_south = np.clip(traci.edge.getLastStepHaltingNumber("edge_S_in") / 20.0, 0, 1)
     q_east = np.clip(traci.edge.getLastStepHaltingNumber("edge_E_in") / 20.0, 0, 1)
     q_west = np.clip(traci.edge.getLastStepHaltingNumber("edge_W_in") / 20.0, 0, 1)
-    
+
     wait_north = np.clip(traci.edge.getWaitingTime("edge_N_in") / 100.0, 0, 1)
     wait_south = np.clip(traci.edge.getWaitingTime("edge_S_in") / 100.0, 0, 1)
     wait_east = np.clip(traci.edge.getWaitingTime("edge_E_in") / 100.0, 0, 1)
     wait_west = np.clip(traci.edge.getWaitingTime("edge_W_in") / 100.0, 0, 1)
+
+    is_n = 1 if current_phase == PHASE_N_GREEN else 0
+    is_e = 1 if current_phase == PHASE_E_GREEN else 0
+    is_s = 1 if current_phase == PHASE_S_GREEN else 0
+    is_w = 1 if current_phase == PHASE_W_GREEN else 0
     
-    # Phase information
-    is_ns_green = 1 if current_phase == PHASE_NS_GREEN_ID else 0
     norm_last_phase_time = np.clip(last_phase_time / 150.0, 0, 1)
     
-    # Pressure (Incoming - Outgoing)
-    # Note: If edges aren't exactly 20 capacity, this normalization is approximate, 
-    # but it must match training exactly.
     pressure_north = np.clip((traci.edge.getLastStepVehicleNumber("edge_N_in") - traci.edge.getLastStepVehicleNumber("edge_S_out")) / 20.0, -1, 1)
     pressure_south = np.clip((traci.edge.getLastStepVehicleNumber("edge_S_in") - traci.edge.getLastStepVehicleNumber("edge_N_out")) / 20.0, -1, 1)
     pressure_east = np.clip((traci.edge.getLastStepVehicleNumber("edge_E_in") - traci.edge.getLastStepVehicleNumber("edge_W_out")) / 20.0, -1, 1)
     pressure_west = np.clip((traci.edge.getLastStepVehicleNumber("edge_W_in") - traci.edge.getLastStepVehicleNumber("edge_E_out")) / 20.0, -1, 1)
 
-    return np.array([q_north, q_south, q_east, q_west, 
-                     wait_north, wait_south, wait_east, wait_west, 
-                     is_ns_green, norm_last_phase_time, 
-                     pressure_north, pressure_south, pressure_east, pressure_west, 
+    return np.array([q_north, q_south, q_east, q_west,
+                     wait_north, wait_south, wait_east, wait_west,
+                     is_n, is_e, is_s, is_w,
+                     norm_last_phase_time,
+                     pressure_north, pressure_south, pressure_east, pressure_west,
                      1.0])
 
-def run_evaluation(experiment_name, nogui, compare_baseline=False):
-    # Paths
+def run_evaluation(experiment_name, model_path, nogui, use_baseline=False):
+    # --- Setup SUMO ---
     sumo_config_base = os.path.normpath(os.path.join(SCRIPT_DIR, "../sumo_config"))
+    route_file_path = os.path.join(sumo_config_base, "hello.rou.xml")
     sumo_cfg_path = os.path.join(sumo_config_base, "hello.sumocfg")
     
-    # We must load the route file specific to the experiment to ensure the evaluation
-    # scenario matches the training scenario name (even if the file is physically hello.rou.xml,
-    # we assume the user might have different route generations)
-    # Ideally, generate the specific route first or assume hello.rou.xml is already set up.
-    
-    model_path = os.path.normpath(os.path.join(SCRIPT_DIR, f"../models/{experiment_name}/dqn_traffic_model.pth"))
-    
-    if not os.path.exists(model_path):
-        print(f"Error: Model not found at {model_path}")
-        return
-
-    print(f"Loading model: {model_path}")
-
-    # Initialize Agent with State Dim 15
-    agent = TrafficLightAgent(state_dim=15, action_dim=2, device=DEVICE)
-    try:
-        agent.model.load_state_dict(torch.load(model_path, map_location=DEVICE))
-        agent.model.eval()
-    except RuntimeError as e:
-        print(f"Error loading model weights. Did you change state_dim? \nDetails: {e}")
-        return
+    generate_routes(experiment_name, route_file_path)
 
     sumo_bin = "sumo" if nogui else "sumo-gui"
-    sumo_cmd = [sumo_bin, "-c", sumo_cfg_path, "--start", "--quit-on-end", "--no-warnings"]
+    sumo_cmd = [sumo_bin, "-c", sumo_cfg_path, "--start", "--quit-on-end", "--no-warnings", "--no-step-log"]
     
-    waits_per_step = []
+    # --- Load Agent (if not baseline) ---
+    agent = None
+    if not use_baseline:
+        if not model_path or not os.path.exists(model_path):
+            print(f"  [ERROR] Model not found at '{model_path}'")
+            return None, None
+        
+        print(f"  Loading model: {os.path.basename(model_path)}")
+        agent = TrafficLightAgent(state_dim=18, action_dim=2, device=DEVICE)
+        try:
+            agent.model.load_state_dict(torch.load(model_path, map_location=DEVICE))
+            agent.model.eval()
+        except Exception as e:
+            print(f"  [ERROR] Could not load model weights: {e}")
+            return None, None
 
+    # --- Simulation Loop ---
+    waits_per_step = []
+    total_reward = 0
+    
     try:
+        if traci.isLoaded(): traci.close()
         traci.start(sumo_cmd)
+        
         step = 0
         last_phase_time = 0
-        total_reward = 0
         previous_total_wait = 0
-        
-        # Initial State
-        current_phase = traci.trafficlight.getPhase('J1')
-        state = get_state(last_phase_time, current_phase)
 
-        print("Starting Evaluation...")
-        
         while step < 1000:
             current_phase_id = traci.trafficlight.getPhase('J1')
-
-            if compare_baseline:
-                # Hard-coded controller: 90s green then 3s yellow, cycling NS -> EW
+            
+            if use_baseline:
                 phase_time = last_phase_time
-                if current_phase_id in (PHASE_NS_GREEN_ID, PHASE_EW_GREEN_ID):
-                    if phase_time >= BASELINE_GREEN:
+                if current_phase_id in ALLOWED_PHASES:
+                    if phase_time >= BASELINE_GREEN_TIME:
                         traci.trafficlight.setPhase('J1', current_phase_id + 1)
                         last_phase_time = 0
-                else:  # yellow
-                    if phase_time >= BASELINE_YELLOW:
-                        # move to the opposite green
-                        traci.trafficlight.setPhase('J1', (current_phase_id + 1) % 4)
+                else:
+                    if phase_time >= YELLOW_TIME:
+                        next_green_phase = (current_phase_id + 1) % 8
+                        traci.trafficlight.setPhase('J1', next_green_phase)
                         last_phase_time = 0
             else:
-                # RL agent acts on green phases
-                if current_phase_id == PHASE_NS_GREEN_ID or current_phase_id == PHASE_EW_GREEN_ID:
-                    action = agent.select_action(state, epsilon=0.0) 
-                    
+                if current_phase_id in ALLOWED_PHASES:
+                    state = get_state(last_phase_time, current_phase_id)
+                    action = agent.select_action(state, epsilon=0.0)
                     if action == 1:
                         traci.trafficlight.setPhase('J1', current_phase_id + 1)
                         last_phase_time = 0
                 else:
-                    # During yellow, action is irrelevant, just wait
                     pass
 
             traci.simulationStep()
             step += 1
             last_phase_time += 1
             
-            # Update state for next step
-            next_phase = traci.trafficlight.getPhase('J1')
-            state = get_state(last_phase_time, next_phase)
-            
-            # Calculate Reward (just for reporting)
             vehicle_ids = traci.vehicle.getIDList()
             current_total_wait = sum(traci.vehicle.getWaitingTime(v_id) for v_id in vehicle_ids)
             waits_per_step.append(current_total_wait)
+            
             reward = (previous_total_wait - current_total_wait) / 100.0
             previous_total_wait = current_total_wait
-            
             total_reward += reward
 
-        print(f"Evaluation Complete. Total Accumulated Reward: {total_reward:.2f}")
-    
     except Exception as e:
-        print(f"Simulation Error: {e}")
+        print(f"  [ERROR] Simulation failed: {e}")
+        return None, None
     finally:
-        if traci.isLoaded(): traci.close()
+        if traci.isLoaded():
+            traci.close()
 
+    print(f"  Evaluation complete. Reward: {total_reward:.2f}")
     return waits_per_step, total_reward
 
-
-def plot_comparison(waits_rl, waits_baseline, save_path):
-    steps = range(len(waits_rl))
-    plt.figure(figsize=(10, 5))
-    plt.plot(steps, waits_rl, label="RL Model", color="blue")
-    plt.plot(steps, waits_baseline, label="Fixed 90s Baseline", color="orange")
+def plot_waits_comparison(waits_rl, waits_baseline, save_path):
+    if waits_rl is None or waits_baseline is None:
+        print("  Skipping plot due to missing data.")
+        return
+        
+    plt.figure(figsize=(12, 6))
+    plt.plot(waits_rl, label="RL Model", color="blue", alpha=0.9)
+    plt.plot(waits_baseline, label="Fixed 30s Cycle", color="orange", alpha=0.9)
     plt.xlabel("Simulation Step")
-    plt.ylabel("Total Waiting Time (s)")
-    plt.title("Intersection Performance: RL vs Fixed Cycle")
+    plt.ylabel("Total System Waiting Time (s)")
+    plt.title(f"Performance Comparison: {os.path.basename(os.path.dirname(save_path))}")
     plt.legend()
-    plt.grid(True, alpha=0.3)
+    plt.grid(True, which='both', linestyle='--', linewidth=0.5)
     plt.tight_layout()
+    
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path)
     plt.close()
+    print(f"  Comparison plot saved to: {save_path}")
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--experiment", type=str, default="stage1_baseline", help="Experiment name folder to load model from")
-    parser.add_argument("--nogui", action="store_true", help="Run without GUI")
-    parser.add_argument("--baseline", action="store_true", help="Run fixed 90s-per-approach controller instead of RL model")
-    parser.add_argument("--plot", action="store_true", help="Also run baseline and save comparison plot")
-    parser.add_argument("--plot-path", type=str, default=None, help="Where to save the comparison plot (png)")
+def main():
+    parser = argparse.ArgumentParser(description="Evaluate a trained traffic control model.")
+    parser.add_argument("--experiment", type=str, default="all", 
+                        help="Experiment name to evaluate, or 'all' to run all experiments.")
+    parser.add_argument("--model", type=str, default=None,
+                        help="Path to a specific .pth model file (optional). Overrides default model search.")
+    parser.add_argument("--suffix", type=str, default="",
+                        help="Optional suffix to append to the plot filename (e.g., '_custom').")
+    parser.add_argument("--nogui", action="store_true",
+                        help="Run SUMO without the GUI.")
     args = parser.parse_args()
 
-    if args.plot:
-        # run both controllers back-to-back for apples-to-apples routes
-        waits_rl, reward_rl = run_evaluation(args.experiment, args.nogui, compare_baseline=False)
-        waits_base, reward_base = run_evaluation(args.experiment, args.nogui, compare_baseline=True)
-        plot_path = args.plot_path or os.path.normpath(os.path.join(SCRIPT_DIR, f"../results/{args.experiment}_compare.png"))
-        os.makedirs(os.path.dirname(plot_path), exist_ok=True)
-        plot_comparison(waits_rl, waits_base, plot_path)
-        print(f"Saved comparison plot to {plot_path}")
-        print(f"Total reward RL: {reward_rl:.2f} | Baseline: {reward_base:.2f}")
+    MODELS_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, "../models"))
+    RESULTS_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, "../results"))
+    
+    if not os.path.exists(MODELS_DIR):
+        print(f"Models directory not found at: {MODELS_DIR}")
+        sys.exit(1)
+
+    experiments_to_run = []
+    if args.experiment.lower() == 'all':
+        experiments_to_run = [d for d in os.listdir(MODELS_DIR) if os.path.isdir(os.path.join(MODELS_DIR, d))]
+        if args.model:
+            print("[WARNING] --model argument is ignored when --experiment is 'all'.")
     else:
-        run_evaluation(args.experiment, args.nogui, compare_baseline=args.baseline)
+        experiments_to_run = [args.experiment]
+        if not os.path.isdir(os.path.join(MODELS_DIR, args.experiment)):
+             print(f"[ERROR] Experiment '{args.experiment}' directory not found in {MODELS_DIR}.")
+             sys.exit(1)
+
+    if not experiments_to_run:
+        print(f"No experiments found to evaluate.")
+        sys.exit(0)
+
+    print(f"Found {len(experiments_to_run)} experiments to evaluate: {experiments_to_run}\n")
+
+    for experiment in experiments_to_run:
+        print(f"--- Evaluating Experiment: {experiment} ---")
+        
+        model_path = args.model
+        if not model_path:
+            model_dir = os.path.join(MODELS_DIR, experiment)
+            model_files = [f for f in os.listdir(model_dir) if f.endswith('.pth')]
+            if not model_files:
+                print(f"  [WARNING] No model file (.pth) found for '{experiment}'. Skipping.")
+                continue
+            model_path = os.path.join(model_dir, model_files[0])
+        
+        plot_filename = f"comparison_plot{args.suffix}.png"
+        result_plot_path = os.path.join(RESULTS_DIR, experiment, plot_filename)
+
+        print("\n[1/2] Running evaluation with RL Agent...")
+        waits_rl, reward_rl = run_evaluation(experiment, model_path, args.nogui, use_baseline=False)
+        
+        print("\n[2/2] Running evaluation with Fixed-Time Baseline...")
+        waits_base, reward_base = run_evaluation(experiment, model_path=None, nogui=args.nogui, use_baseline=True)
+
+        print("\n--- Summary ---")
+        plot_waits_comparison(waits_rl, waits_base, result_plot_path)
+        
+        if reward_rl is not None and reward_base is not None:
+            print(f"  Total Reward (RL): {reward_rl:.2f}")
+            print(f"  Total Reward (Baseline): {reward_base:.2f}")
+        
+        print("-" * (29 + len(experiment)) + "\n")
+
+if __name__ == "__main__":
+    main()
