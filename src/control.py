@@ -15,7 +15,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", DEVICE)
 
-# --- NEW 8-PHASE SPLIT CYCLE CONSTANTS ---
+# --- 8-PHASE SPLIT CYCLE CONSTANTS ---
 # Cycle: North -> Yellow -> East -> Yellow -> South -> Yellow -> West -> Yellow
 PHASE_N_GREEN = 0
 PHASE_N_YELLOW = 1
@@ -73,7 +73,7 @@ def get_state(last_phase_time, current_phase):
     # Breakdown:
     #   4 (Queues)
     # + 4 (Waits)
-    # + 4 (Phase One-Hot: [N, E, S, W]) <--- CHANGED
+    # + 4 (Phase One-Hot: [N, E, S, W])
     # + 1 (Time)
     # + 4 (Pressure)
     # + 1 (Bias)
@@ -261,10 +261,6 @@ def run(experiment_name, args):
                 reward = (previous_total_wait - current_total_wait) / 100.0
                 previous_total_wait = current_total_wait
 
-                # Store memory (Masked if we were locked out? No, storing transitions is fine)
-                # Note: We usually only store transitions where the agent acted.
-                # However, for simplicity, we store steps even during yellow to keep continuity.
-                # Ideally, you might skip storing 'Yellow' steps, but this works fine.
                 agent.remember(state, action, reward, next_state, step >= 1000)
 
                 loss = agent.replay()
