@@ -9,7 +9,7 @@ FedLearning-Robotics/
 ├── src/
 │   ├── agent.py          # The DQN Agent (Neural Network, Memory, Learning Logic)
 │   ├── control.py        # Main Training Loop (SUMO interaction, Route generation)
-│   ├── evaluate.py       # Evaluation Script (Loads trained models for testing)
+│   ├── evaluate.py       # Evaluation Script (Compares trained models to a baseline)
 │   └── client.py         # [Upcoming] Flower Client for Federated Learning
 ├── sumo_config/
 │   ├── hello.net.xml     # Network definition (Junctions, Roads, Lanes)
@@ -21,7 +21,7 @@ FedLearning-Robotics/
 │   ├── stage2_rush_hour/ # Saved .pth models for Stage 2
 │   └── stage3_gridlock/  # Saved .pth models for Stage 3
 ├── results/
-│   └── ...               # Training plots (Reward/Loss curves)
+│   └── ...               # Training & Evaluation plots
 ├── logs/
 │   └── ...               # Text logs of simulation runs
 └── requirements.txt      # Python dependencies
@@ -34,16 +34,18 @@ FedLearning-Robotics/
     **Physics:**
     Vehicles have distinct characteristics (Cars, Buses, Motorcycles) and driver imperfection (speed variance).
 
-    **State Space (15-dim):**
+    **State Space (18-dim):**
     The agent sees the intersection through:
-    - Queue Lengths: Number of halted vehicles on N, S, E, W arms.
-    - Waiting Times: Cumulative wait time per arm.
-    - Pressure: The density difference (Incoming - Outgoing vehicles).
-    - Phase Info: Current phase ID and time elapsed.
+    - **Queue Lengths (4):** Number of halted vehicles on N, S, E, W arms.
+    - **Waiting Times (4):** Cumulative wait time per arm.
+    - **Phase One-Hot (4):** Which direction is green? `[N, E, S, W]`
+    - **Time Elapsed (1):** How long the current green phase has been active.
+    - **Pressure (4):** The density difference (Incoming - Outgoing vehicles) per arm.
+    - **Bias (1):** A constant bias term.
 
     **Action Space (Discrete):**
-    - 0: Keep current phase.
-    - 1: Switch phase.
+    - 0: Keep current green phase.
+    - 1: Switch to the next phase (initiating a yellow light).
 
 2.  **The Agent (DQN)**
 
@@ -58,92 +60,111 @@ FedLearning-Robotics/
     **Huber Loss:**
     Robust to outliers (e.g., sudden massive traffic jams).
 
-## 📊 Experimental Stages & Results
+## 📊 Experimental Stages
 
-We trained the agent on three distinct "levels" of difficulty.
+We train the agent on three distinct "levels" of difficulty.
 
 **Stage 1: Baseline (Standard Intersection)**
 
-- **Scenario:** Moderate, balanced traffic with random volume fluctuations (+/- 10%).
+- **Scenario:** Moderate, balanced traffic with random volume fluctuations.
 - **Goal:** Learn basic queue clearing logic.
-- **Result:**
-  Interpretation: The Blue Line (Reward) shows a steady upward trend, indicating the agent learned to reduce waiting times. The Red Line (Loss) decreases rapidly, showing the neural network successfully converged on a strategy.
 
 **Stage 2: Rush Hour (Non-Stationary)**
 
-- **Scenario:** A realistic morning commute simulation.
-  - 0-300s: Lull (Low Traffic).
-  - 300-700s: Spike (Heavy North-South flow).
-  - 700s+: Cooldown.
-- **Goal:** Adaptation. The agent must switch strategies mid-episode to prioritize the main artery.
-- **Result:**
-  Interpretation: You can see a dip in rewards corresponding to the traffic spike, but the agent recovers. The consistent low loss indicates it successfully generalized the concept of "prioritization."
+- **Scenario:** A realistic morning commute with a heavy North-South traffic spike mid-episode.
+- **Goal:** Adapt strategies mid-episode to prioritize the main artery.
 
 **Stage 3: Gridlock (High Conflict)**
 
-- **Scenario:** Heavy traffic with Blocking Left Turns enabled on a single-lane road.
-- **Goal:** Geometry Management. Left-turning cars block the lane while yielding, causing "phantom jams."
-- **Result:**
-  Interpretation: This graph is more volatile (spiky) because physical blockages are unpredictable. However, the upward trend in reward proves the agent learned non-linear strategies to clear these blockages.
+- **Scenario:** Heavy traffic with single-lane roads where left-turning cars can block the lane, causing "phantom jams."
+- **Goal:** Learn to manage and clear unpredictable physical blockages.
 
-## 📈 Evaluation Performance
+## 🚀 Federated Learning (Next Steps)
 
-After training for 100 episodes, we ran the agent in "Exploitation Mode" (No random actions). The metric is Total Accumulated Reward (Net change in wait time). A score close to 0 is optimal.
-
-| Experiment          | Score | Verdict                                         |
-| :------------------ | :---- | :---------------------------------------------- |
-| Stage 1 (Baseline)  | -0.23 | ✅ Excellent stability.                         |
-| Stage 2 (Rush Hour) | -0.15 | 🏆 Best Performance (Cleared queues perfectly). |
-| Stage 3 (Gridlock)  | -0.23 | ✅ Successfully prevented deadlock.             |
-
-## 🚀 Phase 3: Federated Learning (Next Steps)
-
-Now that we have a capable local agent, we are moving to Federated Learning using the Flower (flwr) framework.
+Now that we have a capable local agent, the project is designed to expand into a Federated Learning system using the Flower (`flwr`) framework.
 
 **Why Federated Learning?**
-In the real world, cities cannot upload raw camera feeds from every intersection to a central cloud due to Privacy and Bandwidth constraints.
-
-**The Architecture**
-
-- **Local Training (Clients):** Each intersection (Client) trains its own local model on its own traffic data.
-- **Aggregation (Server):** Clients send only their Model Weights (not data) to the server.
-- **Federated Averaging:** The server averages the weights to create a "Global Smart Model" and sends it back to all clients.
+In the real world, cities cannot upload raw camera feeds from every intersection to a central cloud due to Privacy and Bandwidth constraints. Federated Learning allows multiple intersections to build a smarter, collaborative model by only sharing their anonymous model weights, not sensitive traffic data.
 
 **Implementation Plan**
 
-- `src/client.py`: Wrap the existing TrafficLightAgent into a `flwr.client.NumPyClient`.
-- `src/server.py`: Create a `flwr.server` to orchestrate the rounds.
-- Multi-Agent Simulation: Spin up 3 parallel SUMO instances (representing 3 different intersections) and train them simultaneously.
+- `src/client.py`: Wrap the existing `TrafficLightAgent` into a `flwr.client.NumPyClient`.
+- `src/server.py`: Create a `flwr.server` to orchestrate the training rounds.
+- Multi-Agent Simulation: Spin up multiple parallel SUMO instances and train them simultaneously as a federation.
 
 ## 🛠️ How to Run
 
 **Prerequisites**
 
-- SUMO installed and `SUMO_HOME` environment variable set.
+- SUMO installed and the `SUMO_HOME` environment variable set.
 - Python 3.8+
 
 **Dependencies:**
 
-- `pip install -r requirements.txt`
+```bash
+pip install -r requirements.txt
+```
 
-1.  **Training**
-    Run the control script to start training. You can specify the experiment stage.
+### 1. Training
 
-    ```bash
-    # Run the Baseline
-    python src/control.py --experiment stage1_baseline
+Run the control script to start training. You must specify the experiment stage. Use the `--nogui` flag to run without the SUMO GUI for faster training.
 
-    # Run the Rush Hour scenario
-    python src/control.py --experiment stage2_rush_hour
+```bash
+# Run the Baseline scenario (with GUI)
+python src/control.py --experiment stage1_baseline
 
-    # Run ALL experiments sequentially
-    python src/control.py --experiment all
-    ```
+# Run the Rush Hour scenario (headless)
+python src/control.py --experiment stage2_rush_hour --nogui
 
-2.  **Evaluation**
-    To test the trained models:
-    ```bash
-    python src/evaluate.py --experiment stage1_baseline --nogui
-    python src/evaluate.py --experiment stage2_rush_hour --nogui
-    python src/evaluate.py --experiment stage3_gridlock --nogui
-    ```
+# Run ALL experiments sequentially (headless)
+python src/control.py --experiment all --nogui
+```
+
+Training will save model files to `models/<experiment_name>/` and learning curve plots to `results/<experiment_name>/`.
+
+### 2. Evaluation
+
+After training, you can evaluate the models using `evaluate.py`. This script compares the performance of trained RL models against a fixed-time baseline and generates plots.
+
+**Usage:**
+
+```bash
+python src/evaluate.py --help
+```
+
+**Examples:**
+
+- **Evaluate all experiments (default behavior):**
+  This will find all trained models in `models/` and generate comparison plots for each.
+
+  ```bash
+  python src/evaluate.py
+  ```
+
+- **Evaluate a specific experiment:**
+
+  ```bash
+  python src/evaluate.py --experiment stage1_baseline
+  ```
+
+- **Evaluate a specific experiment and specify a custom model file:**
+  (Note: The `--model` argument is only used when `--experiment` specifies a single experiment, not 'all'.)
+
+  ```bash
+  python src/evaluate.py --experiment stage1_baseline --model models/stage1_baseline/my_custom_model.pth
+  ```
+
+- **Evaluate a specific experiment and add a suffix to the plot filename:**
+  This is useful for comparing different models or evaluation runs without overwriting previous plots. The plot will be saved as `comparison_plot_mytest.png`.
+
+  ```bash
+  python src/evaluate.py --experiment stage1_baseline --suffix _mytest
+  ```
+
+- **Evaluate with SUMO GUI visible (for debugging):**
+  ```bash
+  python src/evaluate.py --experiment stage1_baseline --nogui
+  ```
+  (Note: The `--nogui` flag in `evaluate.py` controls the SUMO GUI visibility during evaluation simulations.)
+
+Evaluation plots will be saved to `results/<experiment_name>/comparison_plot<suffix>.png`.
