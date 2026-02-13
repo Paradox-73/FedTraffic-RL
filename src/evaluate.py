@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from agent import TrafficLightAgent
 import argparse
+import matplotlib.pyplot as plt
 
 # --- Configuration ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -84,6 +85,8 @@ def run_evaluation(experiment_name, nogui, compare_baseline=False):
     sumo_bin = "sumo" if nogui else "sumo-gui"
     sumo_cmd = [sumo_bin, "-c", sumo_cfg_path, "--start", "--quit-on-end", "--no-warnings"]
     
+    waits_per_step = []
+
     try:
         traci.start(sumo_cmd)
         step = 0
@@ -135,6 +138,7 @@ def run_evaluation(experiment_name, nogui, compare_baseline=False):
             # Calculate Reward (just for reporting)
             vehicle_ids = traci.vehicle.getIDList()
             current_total_wait = sum(traci.vehicle.getWaitingTime(v_id) for v_id in vehicle_ids)
+            waits_per_step.append(current_total_wait)
             reward = (previous_total_wait - current_total_wait) / 100.0
             previous_total_wait = current_total_wait
             
@@ -147,11 +151,40 @@ def run_evaluation(experiment_name, nogui, compare_baseline=False):
     finally:
         if traci.isLoaded(): traci.close()
 
+    return waits_per_step, total_reward
+
+
+def plot_comparison(waits_rl, waits_baseline, save_path):
+    steps = range(len(waits_rl))
+    plt.figure(figsize=(10, 5))
+    plt.plot(steps, waits_rl, label="RL Model", color="blue")
+    plt.plot(steps, waits_baseline, label="Fixed 90s Baseline", color="orange")
+    plt.xlabel("Simulation Step")
+    plt.ylabel("Total Waiting Time (s)")
+    plt.title("Intersection Performance: RL vs Fixed Cycle")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--experiment", type=str, default="stage1_baseline", help="Experiment name folder to load model from")
     parser.add_argument("--nogui", action="store_true", help="Run without GUI")
     parser.add_argument("--baseline", action="store_true", help="Run fixed 90s-per-approach controller instead of RL model")
+    parser.add_argument("--plot", action="store_true", help="Also run baseline and save comparison plot")
+    parser.add_argument("--plot-path", type=str, default=None, help="Where to save the comparison plot (png)")
     args = parser.parse_args()
-    
-    run_evaluation(args.experiment, args.nogui, compare_baseline=args.baseline)
+
+    if args.plot:
+        # run both controllers back-to-back for apples-to-apples routes
+        waits_rl, reward_rl = run_evaluation(args.experiment, args.nogui, compare_baseline=False)
+        waits_base, reward_base = run_evaluation(args.experiment, args.nogui, compare_baseline=True)
+        plot_path = args.plot_path or os.path.normpath(os.path.join(SCRIPT_DIR, f"../results/{args.experiment}_compare.png"))
+        os.makedirs(os.path.dirname(plot_path), exist_ok=True)
+        plot_comparison(waits_rl, waits_base, plot_path)
+        print(f"Saved comparison plot to {plot_path}")
+        print(f"Total reward RL: {reward_rl:.2f} | Baseline: {reward_base:.2f}")
+    else:
+        run_evaluation(args.experiment, args.nogui, compare_baseline=args.baseline)
