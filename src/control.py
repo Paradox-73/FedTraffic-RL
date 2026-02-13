@@ -15,7 +15,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", DEVICE)
 
-# --- NEW 8-PHASE SPLIT CYCLE CONSTANTS ---
+# --- 8-PHASE SPLIT CYCLE CONSTANTS ---
 # Cycle: North -> Yellow -> East -> Yellow -> South -> Yellow -> West -> Yellow
 PHASE_N_GREEN = 0
 PHASE_N_YELLOW = 1
@@ -28,6 +28,8 @@ PHASE_W_YELLOW = 7
 
 # The Agent can only act during Green Phases
 ALLOWED_PHASES = [PHASE_N_GREEN, PHASE_E_GREEN, PHASE_S_GREEN, PHASE_W_GREEN]
+
+NUM_OF_EPISODES = 400
 
 # --- Logger Setup ---
 
@@ -71,7 +73,7 @@ def get_state(last_phase_time, current_phase):
     # Breakdown:
     #   4 (Queues)
     # + 4 (Waits)
-    # + 4 (Phase One-Hot: [N, E, S, W]) <--- CHANGED
+    # + 4 (Phase One-Hot: [N, E, S, W])
     # + 1 (Time)
     # + 4 (Pressure)
     # + 1 (Bias)
@@ -151,7 +153,8 @@ def plot_waits_comparison(waits_rl, waits_baseline, save_path):
     steps = range(len(waits_rl))
     plt.figure(figsize=(12, 5))
     plt.plot(steps, waits_rl, label="RL Model", color="tab:blue")
-    plt.plot(steps, waits_baseline, label="Fixed 90s Baseline", color="tab:orange")
+    plt.plot(steps, waits_baseline,
+             label="Fixed 90s Baseline", color="tab:orange")
     plt.xlabel("Simulation Step")
     plt.ylabel("Total Waiting Time (s)")
     plt.title("Intersection Performance: RL vs Fixed Cycle")
@@ -184,8 +187,10 @@ def run(experiment_name, args):
     os.makedirs(models_dir, exist_ok=True)
     os.makedirs(results_dir, exist_ok=True)
 
-    model_path = os.path.join(models_dir, f"model_{experiment_name}.pth")
-    plot_path = os.path.join(results_dir, f"plot_{experiment_name}.png")
+    model_path = os.path.join(
+        models_dir, f"model_{experiment_name}_epi_{NUM_OF_EPISODES}.pth")
+    plot_path = os.path.join(
+        results_dir, f"plot_{experiment_name}_epi_{NUM_OF_EPISODES}.png")
 
     logs_dir = os.path.normpath(os.path.join(SCRIPT_DIR, "../logs"))
 
@@ -204,7 +209,7 @@ def run(experiment_name, args):
         all_avg_losses = []
         epsilon = 1.0
 
-        num_episodes = 100
+        num_episodes = NUM_OF_EPISODES
         for episode in range(num_episodes):
             generate_routes(experiment_name, route_file_path)
 
@@ -256,10 +261,6 @@ def run(experiment_name, args):
                 reward = (previous_total_wait - current_total_wait) / 100.0
                 previous_total_wait = current_total_wait
 
-                # Store memory (Masked if we were locked out? No, storing transitions is fine)
-                # Note: We usually only store transitions where the agent acted.
-                # However, for simplicity, we store steps even during yellow to keep continuity.
-                # Ideally, you might skip storing 'Yellow' steps, but this works fine.
                 agent.remember(state, action, reward, next_state, step >= 1000)
 
                 loss = agent.replay()

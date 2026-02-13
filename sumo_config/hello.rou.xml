@@ -20,6 +20,7 @@
     <route id="ES" edges="edge_E_in edge_S_out"/>
     <route id="WN" edges="edge_W_in edge_N_out"/>
     <route id="WS" edges="edge_W_in edge_S_out"/>
+<<<<<<< HEAD
 <flow id="f_NS" type="mixed_traffic" route="NS" begin="0" end="1000" probability="0.12334624316298924"/>
 <flow id="f_SN" type="mixed_traffic" route="SN" begin="0" end="1000" probability="0.12334624316298924"/>
 <flow id="f_EW" type="mixed_traffic" route="EW" begin="0" end="1000" probability="0.12334624316298924"/>
@@ -28,4 +29,14 @@
 <flow id="f_SE" type="mixed_traffic" route="SE" begin="0" end="1000" probability="0.03083656079074731"/>
 <flow id="f_EN" type="mixed_traffic" route="EN" begin="0" end="1000" probability="0.03083656079074731"/>
 <flow id="f_WS" type="mixed_traffic" route="WS" begin="0" end="1000" probability="0.03083656079074731"/>
+=======
+<flow id="f_NS" type="mixed_traffic" route="NS" begin="0" end="1000" probability="0.12743802719431593"/>
+<flow id="f_SN" type="mixed_traffic" route="SN" begin="0" end="1000" probability="0.12743802719431593"/>
+<flow id="f_EW" type="mixed_traffic" route="EW" begin="0" end="1000" probability="0.12743802719431593"/>
+<flow id="f_WE" type="mixed_traffic" route="WE" begin="0" end="1000" probability="0.12743802719431593"/>
+<flow id="f_NW" type="mixed_traffic" route="NW" begin="0" end="1000" probability="0.03185950679857898"/>
+<flow id="f_SE" type="mixed_traffic" route="SE" begin="0" end="1000" probability="0.03185950679857898"/>
+<flow id="f_EN" type="mixed_traffic" route="EN" begin="0" end="1000" probability="0.03185950679857898"/>
+<flow id="f_WS" type="mixed_traffic" route="WS" begin="0" end="1000" probability="0.03185950679857898"/>
+>>>>>>> dbd623fa7f0ac1ed30ac974b97a0c4b5c7870a86
 </routes>
