@@ -29,6 +29,8 @@ PHASE_W_YELLOW = 7
 # The Agent can only act during Green Phases
 ALLOWED_PHASES = [PHASE_N_GREEN, PHASE_E_GREEN, PHASE_S_GREEN, PHASE_W_GREEN]
 
+NUM_OF_EPISODES = 1000
+
 # --- Logger Setup ---
 
 
@@ -168,8 +170,10 @@ def run(experiment_name, args):
     os.makedirs(models_dir, exist_ok=True)
     os.makedirs(results_dir, exist_ok=True)
 
-    model_path = os.path.join(models_dir, f"model_{experiment_name}.pth")
-    plot_path = os.path.join(results_dir, f"plot_{experiment_name}.png")
+    model_path = os.path.join(
+        models_dir, f"model_{experiment_name}_epi_{NUM_OF_EPISODES}.pth")
+    plot_path = os.path.join(
+        results_dir, f"plot_{experiment_name}_epi_{NUM_OF_EPISODES}.png")
 
     logs_dir = os.path.normpath(os.path.join(SCRIPT_DIR, "../logs"))
 
@@ -188,7 +192,7 @@ def run(experiment_name, args):
         all_avg_losses = []
         epsilon = 1.0
 
-        num_episodes = 100
+        num_episodes = NUM_OF_EPISODES
         for episode in range(num_episodes):
             generate_routes(experiment_name, route_file_path)
 
