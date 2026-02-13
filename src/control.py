@@ -29,10 +29,9 @@ PHASE_W_YELLOW = 7
 # The Agent can only act during Green Phases
 ALLOWED_PHASES = [PHASE_N_GREEN, PHASE_E_GREEN, PHASE_S_GREEN, PHASE_W_GREEN]
 
-NUM_OF_EPISODES = 400
+NUM_OF_EPISODES = 1000
 
 # --- Logger Setup ---
-
 
 class Logger:
     def __init__(self, log_dir, experiment_name):
@@ -66,7 +65,6 @@ class Logger:
         self.log.flush()
 
 # --- State & Reward Functions ---
-
 
 def get_state(last_phase_time, current_phase):
     # State Dim = 18
@@ -291,7 +289,6 @@ def run(experiment_name, args):
         traceback.print_exc()
     finally:
         logger.stop()
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

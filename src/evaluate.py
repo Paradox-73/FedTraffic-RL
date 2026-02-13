@@ -31,7 +31,6 @@ YELLOW_TIME = 3  # sumo default is 3s
 
 # --- State Function (Exact replica from control.py) ---
 
-
 def get_state(last_phase_time, current_phase):
     # State Dim = 18
     q_north = np.clip(traci.edge.getLastStepHaltingNumber(
@@ -71,9 +70,7 @@ def get_state(last_phase_time, current_phase):
                      pressure_north, pressure_south, pressure_east, pressure_west,
                      1.0])
 
-
 def run_evaluation(experiment_name, model_path, nogui, use_baseline=False):
-    # --- Setup SUMO ---
     sumo_config_base = os.path.normpath(
         os.path.join(SCRIPT_DIR, "../sumo_config"))
     route_file_path = os.path.join(sumo_config_base, "hello.rou.xml")
@@ -82,50 +79,50 @@ def run_evaluation(experiment_name, model_path, nogui, use_baseline=False):
     generate_routes(experiment_name, route_file_path)
 
     sumo_bin = "sumo" if nogui else "sumo-gui"
-    sumo_cmd = [sumo_bin, "-c", sumo_cfg_path, "--start",
-                "--quit-on-end", "--no-warnings", "--no-step-log"]
+    sumo_cmd = [
+        sumo_bin,
+        "-c", sumo_cfg_path,
+        "--start",
+        "--quit-on-end",
+        "--no-warnings",
+        "--no-step-log"
+    ]
 
-    # --- Load Agent (if not baseline) ---
     agent = None
     if not use_baseline:
         if not model_path or not os.path.exists(model_path):
-            print(f"  [ERROR] Model not found at '{model_path}'")
+            print(f"[ERROR] Model not found at '{model_path}'")
             return None, None
 
-        print(f"  Loading model: {os.path.basename(model_path)}")
+        print(f"Loading model: {os.path.basename(model_path)}")
         agent = TrafficLightAgent(state_dim=18, action_dim=2, device=DEVICE)
-        try:
-            agent.model.load_state_dict(
-                torch.load(model_path, map_location=DEVICE))
-            agent.model.eval()
-        except Exception as e:
-            print(f"  [ERROR] Could not load model weights: {e}")
-            return None, None
+        agent.model.load_state_dict(torch.load(model_path, map_location=DEVICE))
+        agent.model.eval()
 
-    # --- Simulation Loop ---
     waits_per_step = []
     total_reward = 0
 
     try:
         if traci.isLoaded():
             traci.close()
+
         traci.start(sumo_cmd)
 
         step = 0
         last_phase_time = 0
-        previous_total_wait = 0
+        previous_avg_wait = 0.0
 
         while step < 1000:
             current_phase_id = traci.trafficlight.getPhase('J1')
 
+            # --- Control Logic ---
             if use_baseline:
-                phase_time = last_phase_time
                 if current_phase_id in ALLOWED_PHASES:
-                    if phase_time >= BASELINE_GREEN_TIME:
+                    if last_phase_time >= BASELINE_GREEN_TIME:
                         traci.trafficlight.setPhase('J1', current_phase_id + 1)
                         last_phase_time = 0
                 else:
-                    if phase_time >= YELLOW_TIME:
+                    if last_phase_time >= YELLOW_TIME:
                         next_green_phase = (current_phase_id + 1) % 8
                         traci.trafficlight.setPhase('J1', next_green_phase)
                         last_phase_time = 0
@@ -136,55 +133,84 @@ def run_evaluation(experiment_name, model_path, nogui, use_baseline=False):
                     if action == 1:
                         traci.trafficlight.setPhase('J1', current_phase_id + 1)
                         last_phase_time = 0
-                else:
-                    pass
 
             traci.simulationStep()
             step += 1
             last_phase_time += 1
 
+            # --- Per-vehicle waiting time ---
             vehicle_ids = traci.vehicle.getIDList()
-            current_total_wait = sum(
-                traci.vehicle.getWaitingTime(v_id) for v_id in vehicle_ids)
-            waits_per_step.append(current_total_wait)
+            num_vehicles = len(vehicle_ids)
 
-            reward = (previous_total_wait - current_total_wait) / 100.0
-            previous_total_wait = current_total_wait
+            if num_vehicles > 0:
+                total_wait = sum(
+                    traci.vehicle.getWaitingTime(v) for v in vehicle_ids
+                )
+                avg_wait = total_wait / num_vehicles
+            else:
+                avg_wait = 0.0
+
+            waits_per_step.append(avg_wait)
+
+            # Reward = reduction in per-vehicle wait
+            reward = previous_avg_wait - avg_wait
+            previous_avg_wait = avg_wait
             total_reward += reward
 
     except Exception as e:
-        print(f"  [ERROR] Simulation failed: {e}")
+        print(f"[ERROR] Simulation failed: {e}")
         return None, None
+
     finally:
         if traci.isLoaded():
             traci.close()
 
-    print(f"  Evaluation complete. Reward: {total_reward:.2f}")
+    print(f"Evaluation complete. Total Reward: {total_reward:.2f}")
+
     return waits_per_step, total_reward
 
-
 def plot_waits_comparison(waits_rl, waits_baseline, save_path):
+
     if waits_rl is None or waits_baseline is None:
-        print("  Skipping plot due to missing data.")
+        print("Skipping plot due to missing data.")
         return
 
+    waits_rl = np.array(waits_rl)
+    waits_baseline = np.array(waits_baseline)
+
+    x = np.arange(len(waits_rl))
+
+    # Stats
+    rl_mean = np.mean(waits_rl)
+    rl_median = np.median(waits_rl)
+
+    base_mean = np.mean(waits_baseline)
+    base_median = np.median(waits_baseline)
+
     plt.figure(figsize=(12, 6))
-    plt.plot(waits_rl, label="RL Model", color="blue", alpha=0.9)
-    plt.plot(waits_baseline, label="Fixed 30s Cycle",
-             color="orange", alpha=0.9)
+
+    # RL Curve
+    plt.plot(x, waits_rl, label="RL", linewidth=1.5)
+    plt.axhline(rl_mean, linestyle="--", label="RL Mean")
+    plt.axhline(rl_median, linestyle=":", label="RL Median")
+
+    # Baseline Curve
+    plt.plot(x, waits_baseline, label="Baseline", linewidth=1.5)
+    plt.axhline(base_mean, linestyle="--", label="Baseline Mean")
+    plt.axhline(base_median, linestyle=":", label="Baseline Median")
+
     plt.xlabel("Simulation Step")
-    plt.ylabel("Total System Waiting Time (s)")
-    plt.title(
-        f"Performance Comparison: {os.path.basename(os.path.dirname(save_path))}")
+    plt.ylabel("Average Waiting Time Per Vehicle (s)")
+    plt.title("Per-Vehicle Waiting Time Comparison")
     plt.legend()
-    plt.grid(True, which='both', linestyle='--', linewidth=0.5)
+    plt.grid(True, linestyle="--", linewidth=0.5)
     plt.tight_layout()
 
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path)
     plt.close()
-    print(f"  Comparison plot saved to: {save_path}")
 
+    print(f"Comparison plot saved to: {save_path}")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -259,7 +285,6 @@ def main():
             print(f"  Total Reward (Baseline): {reward_base:.2f}")
 
         print("-" * (29 + len(experiment)) + "\n")
-
 
 if __name__ == "__main__":
     main()
