@@ -9,6 +9,7 @@ from generate_routes import generate_routes
 import argparse
 import random
 import shutil
+import time
 
 # --- Configuration ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -26,10 +27,20 @@ PHASE_S_YELLOW = 5
 PHASE_W_GREEN = 6
 PHASE_W_YELLOW = 7
 
-# The Agent can only act during Green Phases
-ALLOWED_PHASES = [PHASE_N_GREEN, PHASE_E_GREEN, PHASE_S_GREEN, PHASE_W_GREEN]
+MIN_GREEN_TIME = 10  # seconds
+YELLOW_TIME = 3  # seconds
 
-NUM_OF_EPISODES = 400
+# Mapping from Agent Action (0-3) to Green Phase
+GREEN_PHASES = [PHASE_N_GREEN, PHASE_E_GREEN, PHASE_S_GREEN, PHASE_W_GREEN]
+# Mapping from Green Phase to its corresponding Yellow Phase
+YELLOW_PHASES = {
+    PHASE_N_GREEN: PHASE_N_YELLOW,
+    PHASE_E_GREEN: PHASE_E_YELLOW,
+    PHASE_S_GREEN: PHASE_S_YELLOW,
+    PHASE_W_GREEN: PHASE_W_YELLOW,
+}
+
+NUM_OF_EPISODES = 10
 
 # --- Logger Setup ---
 
@@ -202,62 +213,85 @@ def run(experiment_name, args):
             traci.close()
         print(f"Starting experiment: {experiment_name}")
 
-        # --- INIT AGENT WITH STATE DIM (18) ---
-        agent = TrafficLightAgent(state_dim=18, action_dim=2)
+        agent = TrafficLightAgent(state_dim=18, action_dim=4, device=DEVICE)
 
         all_rewards = []
         all_avg_losses = []
         epsilon = 1.0
 
-        num_episodes = NUM_OF_EPISODES
-        for episode in range(num_episodes):
+        for episode in range(NUM_OF_EPISODES):
             generate_routes(experiment_name, route_file_path)
+            time.sleep(0.1) # Small delay to ensure file is written before SUMO starts
 
             if traci.isLoaded():
                 traci.close()
             traci.start(sumo_cmd)
 
             step = 0
-            last_phase_time = 0
             episode_reward = 0
             episode_losses = []
+
+            last_action_time = 0
+            time_in_phase = 0
+
+            # The phase we are transitioning to
+            next_green_phase = None
+
+            # The current green phase
+            current_green_phase = traci.trafficlight.getPhase('J1')
+
+            state = get_state(time_in_phase, current_green_phase)
+
             previous_total_wait = 0
 
-            state = get_state(
-                last_phase_time, traci.trafficlight.getPhase('J1'))
-
             while step < 1000:
-                current_phase_id = traci.trafficlight.getPhase('J1')
+                current_phase = traci.trafficlight.getPhase('J1')
 
-                # --- Check against ALLOWED Green Phases ---
-                if current_phase_id in ALLOWED_PHASES:
+                # If we are in a yellow phase, wait for it to finish
+                if current_phase in YELLOW_PHASES.values():
+                    traci.simulationStep()
+                    step += 1
+                    time_in_phase += 1
+                    if time_in_phase >= YELLOW_TIME:
+                        # Yellow finished, switch to target green
+                        traci.trafficlight.setPhase('J1', next_green_phase)
+                        current_green_phase = next_green_phase
+                        time_in_phase = 0
+                    continue
+
+                # --- RL AGENT LOGIC ---
+                # Only ask the agent for a decision if the min green time has passed
+                if time_in_phase < MIN_GREEN_TIME:
+                    action = GREEN_PHASES.index(
+                        current_green_phase)  # Keep current phase
+                else:
                     action = agent.select_action(state, epsilon)
 
-                    if action == 1:
-                        # Switch to Next Phase (which is Yellow)
-                        # Phase order: 0(Green) -> 1(Yellow) -> 2(Green) ...
-                        traci.trafficlight.setPhase('J1', current_phase_id + 1)
-                        last_phase_time = 0
-                    else:
-                        # Action 0: Keep Green (Do nothing, let time pass)
-                        pass
+                # Map agent action to a green phase
+                chosen_phase = GREEN_PHASES[action]
+
+                if chosen_phase == current_green_phase:
+                    # Agent chose to continue the current green phase
+                    pass
                 else:
-                    # If Yellow (Phases 1, 3, 5, 7), we are locked out.
-                    # Just wait for SUMO to finish the yellow timer (3s).
-                    action = 0
+                    # Agent chose to switch, initiate yellow phase transition
+                    yellow_phase = YELLOW_PHASES[current_green_phase]
+                    traci.trafficlight.setPhase('J1', yellow_phase)
+                    next_green_phase = chosen_phase
+                    time_in_phase = 0  # Reset timer for yellow phase
 
                 traci.simulationStep()
                 step += 1
-                last_phase_time += 1
+                time_in_phase += 1
 
+                # --- REWARD & STATE UPDATE ---
                 next_phase_id = traci.trafficlight.getPhase('J1')
-                next_state = get_state(last_phase_time, next_phase_id)
+                next_state = get_state(time_in_phase, next_phase_id)
 
                 vehicle_ids = traci.vehicle.getIDList()
                 current_total_wait = sum(
                     traci.vehicle.getWaitingTime(v_id) for v_id in vehicle_ids)
 
-                # Reward: Improvement in total waiting time
                 reward = (previous_total_wait - current_total_wait) / 100.0
                 previous_total_wait = current_total_wait
 
@@ -272,11 +306,12 @@ def run(experiment_name, args):
 
             if (episode + 1) % 10 == 0:
                 agent.update_target_network()
+
             epsilon = max(0.01, epsilon * 0.995)
             avg_loss = np.mean(episode_losses) if episode_losses else 0
             all_rewards.append(episode_reward)
             all_avg_losses.append(avg_loss)
-            print(f"  Episode {episode+1}/{num_episodes} | "
+            print(f"  Episode {episode+1}/{NUM_OF_EPISODES} | "
                   f"Reward: {episode_reward:7.2f} | "
                   f"Loss: {avg_loss:7.4f} | "
                   f"Epsilon: {epsilon:5.3f}")
