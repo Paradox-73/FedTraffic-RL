@@ -10,6 +10,7 @@ import argparse
 import random
 import shutil
 import time
+import xml.etree.ElementTree as ET
 
 # --- Configuration ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -40,7 +41,7 @@ YELLOW_PHASES = {
     PHASE_W_GREEN: PHASE_W_YELLOW,
 }
 
-NUM_OF_EPISODES = 10
+NUM_OF_EPISODES = 1000
 
 # --- Logger Setup ---
 
@@ -159,6 +160,43 @@ def plot_rewards(rewards, losses, save_path):
     print(f"Plot saved to: {save_path}")
 
 
+def plot_additional_stats(avg_wait_times, min_wait_times, max_wait_times,
+                          completed_vehicles, total_vehicles, remaining_vehicles, save_path):
+    plt.figure(figsize=(12, 5))
+
+    # Plot 1: Average Waiting Time with Min/Max Range
+    plt.subplot(1, 2, 1)
+    episodes = range(len(avg_wait_times))
+    plt.plot(episodes, avg_wait_times,
+             label="Avg. Waiting Time", color="green")
+    plt.fill_between(episodes, min_wait_times, max_wait_times,
+                     color='green', alpha=0.2, label="Min/Max Wait")
+    plt.xlabel("Episode")
+    plt.ylabel("Waiting Time (s)")
+    plt.title("Waiting Time Statistics per Episode")
+    plt.legend()
+    plt.grid()
+
+    # Plot 2: Vehicle Throughput
+    plt.subplot(1, 2, 2)
+    plt.plot(episodes, total_vehicles,
+             label="Total Vehicles in Sim", color="blue", linestyle='--')
+    plt.plot(episodes, completed_vehicles,
+             label="Completed Vehicles", color="purple")
+    plt.plot(episodes, remaining_vehicles,
+             label="Remaining Vehicles", color="red", linestyle=':')
+    plt.xlabel("Episode")
+    plt.ylabel("Number of Vehicles")
+    plt.title("Vehicle Throughput per Episode")
+    plt.legend()
+    plt.grid()
+
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+    print(f"Additional stats plot saved to: {save_path}")
+
+
 def plot_waits_comparison(waits_rl, waits_baseline, save_path):
     """Plot per-step total waiting time for RL vs fixed schedule."""
     steps = range(len(waits_rl))
@@ -176,6 +214,28 @@ def plot_waits_comparison(waits_rl, waits_baseline, save_path):
     plt.close()
 
 
+def get_stats_from_tripinfo(filepath):
+    """Parses a SUMO tripinfo XML and returns avg, max, min waiting times and completed vehicle count."""
+    if not os.path.exists(filepath):
+        return 0, 0, 0, 0
+
+    tree = ET.parse(filepath)
+    root = tree.getroot()
+
+    wait_times = [float(trip.get("waitingTime"))
+                  for trip in root.findall("tripinfo")]
+
+    if not wait_times:
+        return 0, 0, 0, 0
+
+    avg_wait = np.mean(wait_times)
+    max_wait = np.max(wait_times)
+    min_wait = np.min(wait_times)
+    completed_vehicles = len(wait_times)
+
+    return avg_wait, max_wait, min_wait, completed_vehicles
+
+
 def run(experiment_name, args):
     random.seed(42)
     np.random.seed(42)
@@ -186,10 +246,12 @@ def run(experiment_name, args):
     route_file_path = os.path.join(sumo_config_base, "hello.rou.xml")
     sumo_cfg_path = os.path.join(sumo_config_base, "hello.sumocfg")
     sumo_log_file = os.path.join(sumo_config_base, "sumo_debug.log")
+    tripinfo_path = os.path.join(sumo_config_base, "tripinfo.xml")
 
     sumo_bin = "sumo" if args.nogui else "sumo-gui"
     sumo_cmd = [sumo_bin, "-c", sumo_cfg_path, "--start", "--quit-on-end",
-                "--no-warnings", "--no-step-log", "--log", sumo_log_file, "--error-log", sumo_log_file]
+                "--no-warnings", "--no-step-log", "--log", sumo_log_file,
+                "--error-log", sumo_log_file, "--tripinfo-output", tripinfo_path]
 
     models_dir = os.path.normpath(os.path.join(
         SCRIPT_DIR, f"../models/{experiment_name}"))
@@ -202,6 +264,8 @@ def run(experiment_name, args):
         models_dir, f"model_{experiment_name}_epi_{NUM_OF_EPISODES}.pth")
     plot_path = os.path.join(
         results_dir, f"plot_{experiment_name}_epi_{NUM_OF_EPISODES}.png")
+    stats_plot_path = os.path.join(
+        results_dir, f"stats_{experiment_name}_epi_{NUM_OF_EPISODES}.png")
 
     logs_dir = os.path.normpath(os.path.join(SCRIPT_DIR, "../logs"))
 
@@ -217,11 +281,19 @@ def run(experiment_name, args):
 
         all_rewards = []
         all_avg_losses = []
+        all_avg_wait_times = []
+        all_min_wait_times = []
+        all_max_wait_times = []
+        all_completed_vehicles = []
+        all_total_vehicles = []
+        all_remaining_vehicles = []
         epsilon = 1.0
 
         for episode in range(NUM_OF_EPISODES):
-            generate_routes(experiment_name, route_file_path)
-            time.sleep(0.1) # Small delay to ensure file is written before SUMO starts
+            total_vehicles_in_sim = generate_routes(
+                experiment_name, route_file_path)
+            all_total_vehicles.append(total_vehicles_in_sim)
+            time.sleep(0.1)
 
             if traci.isLoaded():
                 traci.close()
@@ -231,62 +303,44 @@ def run(experiment_name, args):
             episode_reward = 0
             episode_losses = []
 
-            last_action_time = 0
             time_in_phase = 0
-
-            # The current green phase
             current_green_phase = traci.trafficlight.getPhase('J1')
-            # The phase we are transitioning to
-            next_green_phase = current_green_phase 
-
+            next_green_phase = current_green_phase
             state = get_state(time_in_phase, current_green_phase)
-
             previous_total_wait = 0
 
             while step < 1000:
                 current_phase = traci.trafficlight.getPhase('J1')
 
-                # If we are in a yellow phase, wait for it to finish
                 if current_phase in YELLOW_PHASES.values():
                     traci.simulationStep()
                     step += 1
                     time_in_phase += 1
                     if time_in_phase >= YELLOW_TIME:
-                        # Yellow finished, switch to target green
                         traci.trafficlight.setPhase('J1', next_green_phase)
                         current_green_phase = next_green_phase
                         time_in_phase = 0
                     continue
 
-                # --- RL AGENT LOGIC ---
-                # Only ask the agent for a decision if the min green time has passed
                 if time_in_phase < MIN_GREEN_TIME:
-                    action = GREEN_PHASES.index(
-                        current_green_phase)  # Keep current phase
+                    action = GREEN_PHASES.index(current_green_phase)
                 else:
                     action = agent.select_action(state, epsilon)
 
-                # Map agent action to a green phase
                 chosen_phase = GREEN_PHASES[action]
 
-                if chosen_phase == current_green_phase:
-                    # Agent chose to continue the current green phase
-                    pass
-                else:
-                    # Agent chose to switch, initiate yellow phase transition
+                if chosen_phase != current_green_phase:
                     yellow_phase = YELLOW_PHASES[current_green_phase]
                     traci.trafficlight.setPhase('J1', yellow_phase)
                     next_green_phase = chosen_phase
-                    time_in_phase = 0  # Reset timer for yellow phase
+                    time_in_phase = 0
 
                 traci.simulationStep()
                 step += 1
                 time_in_phase += 1
 
-                # --- REWARD & STATE UPDATE ---
                 next_phase_id = traci.trafficlight.getPhase('J1')
                 next_state = get_state(time_in_phase, next_phase_id)
-
                 vehicle_ids = traci.vehicle.getIDList()
                 current_total_wait = sum(
                     traci.vehicle.getWaitingTime(v_id) for v_id in vehicle_ids)
@@ -295,13 +349,22 @@ def run(experiment_name, args):
                 previous_total_wait = current_total_wait
 
                 agent.remember(state, action, reward, next_state, step >= 1000)
-
                 loss = agent.replay()
                 if loss is not None:
                     episode_losses.append(loss)
-
                 state = next_state
                 episode_reward += reward
+
+            traci.close()
+
+            avg_wait, max_wait, min_wait, completed_vehicles = get_stats_from_tripinfo(
+                tripinfo_path)
+            all_avg_wait_times.append(avg_wait)
+            all_max_wait_times.append(max_wait)
+            all_min_wait_times.append(min_wait)
+            all_completed_vehicles.append(completed_vehicles)
+            remaining_vehicles = total_vehicles_in_sim - completed_vehicles
+            all_remaining_vehicles.append(remaining_vehicles)
 
             if (episode + 1) % 10 == 0:
                 agent.update_target_network()
@@ -313,11 +376,17 @@ def run(experiment_name, args):
             print(f"  Episode {episode+1}/{NUM_OF_EPISODES} | "
                   f"Reward: {episode_reward:7.2f} | "
                   f"Loss: {avg_loss:7.4f} | "
-                  f"Epsilon: {epsilon:5.3f}")
+                  f"Epsilon: {epsilon:5.3f} | "
+                  f"Avg Wait: {avg_wait:5.2f}s | "
+                  f"Completed: {completed_vehicles}/{total_vehicles_in_sim} | "
+                  f"Remaining: {remaining_vehicles}")
 
         torch.save(agent.model.state_dict(), model_path)
         print(f"Model saved to: {model_path}")
         plot_rewards(all_rewards, all_avg_losses, plot_path)
+        plot_additional_stats(
+            all_avg_wait_times, all_min_wait_times, all_max_wait_times,
+            all_completed_vehicles, all_total_vehicles, all_remaining_vehicles, stats_plot_path)
 
     except Exception as e:
         print(f"Fatal error: {e}")
@@ -337,7 +406,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.experiment == "all":
-        stages = ["stage1_baseline", "stage2_rush_hour", "stage3_gridlock"]
+        stages = [
+            # "stage1_baseline",
+            "stage2_rush_hour", "stage3_gridlock"]
         for stage in stages:
             print(f"\nSTARTING EXPERIMENT: {stage}")
             run(stage, args)

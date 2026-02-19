@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import argparse
 from agent import TrafficLightAgent
 from generate_routes import generate_routes
+import xml.etree.ElementTree as ET
 
 # --- Configuration ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -70,13 +71,37 @@ def get_state(last_phase_time, current_phase):
                      pressure_north, pressure_south, pressure_east, pressure_west,
                      1.0])
 
-def run_evaluation(experiment_name, model_path, nogui, use_baseline=False):
+
+def get_stats_from_tripinfo(filepath):
+    """Parses a SUMO tripinfo XML and returns avg, max, min waiting times and completed vehicle count."""
+    if not os.path.exists(filepath):
+        return 0, 0, 0, 0
+
+    tree = ET.parse(filepath)
+    root = tree.getroot()
+
+    wait_times = [float(trip.get("waitingTime"))
+                  for trip in root.findall("tripinfo")]
+
+    if not wait_times:
+        return 0, 0, 0, 0
+
+    avg_wait = np.mean(wait_times)
+    max_wait = np.max(wait_times)
+    min_wait = np.min(wait_times)
+    completed_vehicles = len(wait_times)
+
+    return avg_wait, max_wait, min_wait, completed_vehicles
+
+
+def run_evaluation(experiment_name, model_path, nogui, use_baseline=False, tripinfo_path=None):
     sumo_config_base = os.path.normpath(
         os.path.join(SCRIPT_DIR, "../sumo_config"))
     route_file_path = os.path.join(sumo_config_base, "hello.rou.xml")
     sumo_cfg_path = os.path.join(sumo_config_base, "hello.sumocfg")
 
-    generate_routes(experiment_name, route_file_path)
+    # generate_routes is called outside this function to ensure both RL and Baseline use the same traffic.
+    # total_vehicles_in_sim is now passed as an argument.
 
     sumo_bin = "sumo" if nogui else "sumo-gui"
     sumo_cmd = [
@@ -85,14 +110,16 @@ def run_evaluation(experiment_name, model_path, nogui, use_baseline=False):
         "--start",
         "--quit-on-end",
         "--no-warnings",
-        "--no-step-log"
+        "--no-step-log",
+        "--tripinfo-output", tripinfo_path # Added tripinfo output
     ]
 
     agent = None
     if not use_baseline:
         if not model_path or not os.path.exists(model_path):
             print(f"[ERROR] Model not found at '{model_path}'")
-            return None, None
+            # Return None for all expected values
+            return None, None, None, None, None, None
 
         print(f"Loading model: {os.path.basename(model_path)}")
         agent = TrafficLightAgent(state_dim=18, action_dim=2, device=DEVICE)
@@ -159,15 +186,22 @@ def run_evaluation(experiment_name, model_path, nogui, use_baseline=False):
 
     except Exception as e:
         print(f"[ERROR] Simulation failed: {e}")
-        return None, None
+        return None, None, None, None, None, None
 
     finally:
         if traci.isLoaded():
             traci.close()
 
-    print(f"Evaluation complete. Total Reward: {total_reward:.2f}")
+    # Get stats from tripinfo after closing traci
+    avg_wait, max_wait, min_wait, completed_vehicles = get_stats_from_tripinfo(
+        tripinfo_path)
 
-    return waits_per_step, total_reward
+    print(
+        f"Evaluation complete. Total Reward: {total_reward:.2f}, "
+        f"Avg Wait: {avg_wait:.2f}s, Completed Vehicles: {completed_vehicles}"
+    )
+
+    return waits_per_step, total_reward, avg_wait, max_wait, min_wait, completed_vehicles
 
 def plot_waits_comparison(waits_rl, waits_baseline, save_path):
 
@@ -211,6 +245,44 @@ def plot_waits_comparison(waits_rl, waits_baseline, save_path):
     plt.close()
 
     print(f"Comparison plot saved to: {save_path}")
+
+
+def plot_additional_stats(avg_wait_times, min_wait_times, max_wait_times,
+                          completed_vehicles, total_vehicles, remaining_vehicles, save_path):
+    plt.figure(figsize=(12, 5))
+
+    # Plot 1: Average Waiting Time with Min/Max Range
+    plt.subplot(1, 2, 1)
+    episodes = range(len(avg_wait_times))
+    plt.plot(episodes, avg_wait_times, label="Avg. Waiting Time", color="green")
+    plt.fill_between(episodes, min_wait_times, max_wait_times,
+                     color='green', alpha=0.2, label="Min/Max Wait")
+    plt.xlabel("Episode")
+    plt.ylabel("Waiting Time (s)")
+    plt.title("Waiting Time Statistics per Episode")
+    plt.legend()
+    plt.grid()
+
+    # Plot 2: Vehicle Throughput
+    plt.subplot(1, 2, 2)
+    plt.plot(episodes, total_vehicles,
+             label="Total Vehicles in Sim", color="blue", linestyle='--')
+    plt.plot(episodes, completed_vehicles,
+             label="Completed Vehicles", color="purple")
+    plt.plot(episodes, remaining_vehicles,
+             label="Remaining Vehicles", color="red", linestyle=':')
+    plt.xlabel("Episode")
+    plt.ylabel("Number of Vehicles")
+    plt.title("Vehicle Throughput per Episode")
+    plt.legend()
+    plt.grid()
+
+    plt.tight_layout()
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    plt.savefig(save_path)
+    plt.close()
+    print(f"Additional stats plot saved to: {save_path}")
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -266,19 +338,58 @@ def main():
                 continue
             model_path = os.path.join(model_dir, model_files[0])
 
-        plot_filename = f"comparison_plot{args.suffix}.png"
-        result_plot_path = os.path.join(RESULTS_DIR, experiment, plot_filename)
+        sumo_config_base = os.path.normpath(
+            os.path.join(SCRIPT_DIR, "../sumo_config"))
+        route_file_path = os.path.join(sumo_config_base, "hello.rou.xml")
+        tripinfo_path = os.path.join(
+            RESULTS_DIR, experiment, f"tripinfo_{experiment}.xml")
+
+        # Ensure results directory exists for this experiment
+        os.makedirs(os.path.join(RESULTS_DIR, experiment), exist_ok=True)
+
+        # Generate routes once for the experiment, both RL and baseline will use this traffic
+        total_vehicles_in_sim = generate_routes(experiment, route_file_path)
+
+        plot_comparison_filename = f"comparison_plot{args.suffix}.png"
+        result_plot_path = os.path.join(
+            RESULTS_DIR, experiment, plot_comparison_filename)
+
+        stats_plot_rl_filename = f"stats_rl{args.suffix}.png"
+        stats_plot_rl_path = os.path.join(
+            RESULTS_DIR, experiment, stats_plot_rl_filename)
+
+        stats_plot_baseline_filename = f"stats_baseline{args.suffix}.png"
+        stats_plot_baseline_path = os.path.join(
+            RESULTS_DIR, experiment, stats_plot_baseline_filename)
 
         print("\n[1/2] Running evaluation with RL Agent...")
-        waits_rl, reward_rl = run_evaluation(
-            experiment, model_path, args.nogui, use_baseline=False)
+        waits_rl, reward_rl, avg_wait_rl, max_wait_rl, min_wait_rl, completed_rl = run_evaluation(
+            experiment, model_path, args.nogui, use_baseline=False, tripinfo_path=tripinfo_path)
 
         print("\n[2/2] Running evaluation with Fixed-Time Baseline...")
-        waits_base, reward_base = run_evaluation(
-            experiment, model_path=None, nogui=args.nogui, use_baseline=True)
+        waits_base, reward_base, avg_wait_base, max_wait_base, min_wait_base, completed_base = run_evaluation(
+            experiment, model_path=None, nogui=args.nogui, use_baseline=True, tripinfo_path=tripinfo_path)
 
         print("\n--- Summary ---")
         plot_waits_comparison(waits_rl, waits_base, result_plot_path)
+
+        if all(x is not None for x in [avg_wait_rl, min_wait_rl, max_wait_rl, completed_rl]):
+            remaining_rl = total_vehicles_in_sim - completed_rl
+            plot_additional_stats(
+                [avg_wait_rl], [min_wait_rl], [max_wait_rl],
+                [completed_rl], [total_vehicles_in_sim], [remaining_rl],
+                stats_plot_rl_path
+            )
+            print(f"  RL Metrics - Avg Wait: {avg_wait_rl:.2f}s, Completed: {completed_rl}/{total_vehicles_in_sim}, Remaining: {remaining_rl}")
+
+        if all(x is not None for x in [avg_wait_base, min_wait_base, max_wait_base, completed_base]):
+            remaining_base = total_vehicles_in_sim - completed_base
+            plot_additional_stats(
+                [avg_wait_base], [min_wait_base], [max_wait_base],
+                [completed_base], [total_vehicles_in_sim], [remaining_base],
+                stats_plot_baseline_path
+            )
+            print(f"  Baseline Metrics - Avg Wait: {avg_wait_base:.2f}s, Completed: {completed_base}/{total_vehicles_in_sim}, Remaining: {remaining_base}")
 
         if reward_rl is not None and reward_base is not None:
             print(f"  Total Reward (RL): {reward_rl:.2f}")

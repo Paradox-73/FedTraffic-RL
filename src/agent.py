@@ -19,7 +19,7 @@ class TrafficLightDQN(nn.Module):
         return self.fc3(x)
 
 class TrafficLightAgent:
-    def __init__(self, state_dim=11, action_dim=4, device="cpu", lr=1e-4, gamma=0.99, batch_size=64, memory_size=10000):
+    def __init__(self, state_dim=15, action_dim=4, device="cpu", lr=1e-4, gamma=0.99, batch_size=64, memory_size=10000):
         self.device = device
         self.gamma = gamma
         self.batch_size = batch_size
