@@ -98,3 +98,5 @@ Thumbs.db
 
 # Runtime files
 .cache/
+log.txt
+report.txt

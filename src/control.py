@@ -234,11 +234,10 @@ def run(experiment_name, args):
             last_action_time = 0
             time_in_phase = 0
 
-            # The phase we are transitioning to
-            next_green_phase = None
-
             # The current green phase
             current_green_phase = traci.trafficlight.getPhase('J1')
+            # The phase we are transitioning to
+            next_green_phase = current_green_phase 
 
             state = get_state(time_in_phase, current_green_phase)
 

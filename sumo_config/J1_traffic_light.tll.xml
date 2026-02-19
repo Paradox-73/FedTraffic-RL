@@ -1,0 +1,20 @@
+<additional>
+    <tlLogic id="J1" type="static" programID="0" offset="0">
+        <!-- PHASE_N_GREEN = 0 -->
+        <phase duration="10" state="ggggrrrrrrrrrrrr"/>
+        <!-- PHASE_N_YELLOW = 1 -->
+        <phase duration="3" state="yyyyrrrrrrrrrrrr"/>
+        <!-- PHASE_E_GREEN = 2 -->
+        <phase duration="10" state="rrrrggggrrrrrrrr"/>
+        <!-- PHASE_E_YELLOW = 3 -->
+        <phase duration="3" state="rrrryyyyrrrrrrrr"/>
+        <!-- PHASE_S_GREEN = 4 -->
+        <phase duration="10" state="rrrrrrrrggggrrrr"/>
+        <!-- PHASE_S_YELLOW = 5 -->
+        <phase duration="3" state="rrrrrrrryyyyrrrr"/>
+        <!-- PHASE_W_GREEN = 6 -->
+        <phase duration="10" state="rrrrrrrrrrrrgggg"/>
+        <!-- PHASE_W_YELLOW = 7 -->
+        <phase duration="3" state="rrrrrrrrrrrryyyy"/>
+    </tlLogic>
+</additional>

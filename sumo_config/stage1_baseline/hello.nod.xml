@@ -1,6 +1,6 @@
 <nodes>
     <node id="J1" type="traffic_light" x="0" y="0"/>
-    <node id="N" x="0" y="250" type="priority"/>
+    <node id="N" x="0" y="2500" type="priority"/>
     <node id="S" x="0" y="-250" type="priority"/>
     <node id="E" x="250" y="0" type="priority"/>
     <node id="W" x="-250" y="0" type="priority"/>
