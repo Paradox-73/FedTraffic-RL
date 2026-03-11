@@ -41,7 +41,7 @@ YELLOW_PHASES = {
     PHASE_W_GREEN: PHASE_W_YELLOW,
 }
 
-NUM_OF_EPISODES = 1000
+NUM_OF_EPISODES = 200
 
 # --- Logger Setup ---
 
@@ -345,7 +345,8 @@ def run(experiment_name, args):
                 current_total_wait = sum(
                     traci.vehicle.getWaitingTime(v_id) for v_id in vehicle_ids)
 
-                reward = (previous_total_wait - current_total_wait) / 100.0
+                # reward = (previous_total_wait - current_total_wait) / 100.0
+                reward = -(current_total_wait) / 100
                 previous_total_wait = current_total_wait
 
                 agent.remember(state, action, reward, next_state, step >= 1000)
@@ -407,7 +408,7 @@ if __name__ == "__main__":
 
     if args.experiment == "all":
         stages = [
-            # "stage1_baseline",
+            "stage1_baseline",
             "stage2_rush_hour", "stage3_gridlock"]
         for stage in stages:
             print(f"\nSTARTING EXPERIMENT: {stage}")

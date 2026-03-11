@@ -24,11 +24,23 @@ PHASE_W_GREEN = 6
 PHASE_W_YELLOW = 7
 
 # The Agent can only act during Green Phases
-ALLOWED_PHASES = [PHASE_N_GREEN, PHASE_E_GREEN, PHASE_S_GREEN, PHASE_W_GREEN]
+# ALLOWED_PHASES = [PHASE_N_GREEN, PHASE_E_GREEN, PHASE_S_GREEN, PHASE_W_GREEN] # old
+GREEN_PHASES = [PHASE_N_GREEN, PHASE_E_GREEN,
+                PHASE_S_GREEN, PHASE_W_GREEN]  # new
+
+# Mapping from Green Phase to its corresponding Yellow Phase
+YELLOW_PHASES = {
+    PHASE_N_GREEN: PHASE_N_YELLOW,
+    PHASE_E_GREEN: PHASE_E_YELLOW,
+    PHASE_S_GREEN: PHASE_S_YELLOW,
+    PHASE_W_GREEN: PHASE_W_YELLOW,
+}
 
 # Fixed baseline: 30s green for each of the 4 approaches
 BASELINE_GREEN_TIME = 30
 YELLOW_TIME = 3  # sumo default is 3s
+ACTION_COMMIT_TIME = 10  # seconds, new
+
 
 # --- State Function (Exact replica from control.py) ---
 
@@ -100,108 +112,141 @@ def run_evaluation(experiment_name, model_path, nogui, use_baseline=False, tripi
     route_file_path = os.path.join(sumo_config_base, "hello.rou.xml")
     sumo_cfg_path = os.path.join(sumo_config_base, "hello.sumocfg")
 
-    # generate_routes is called outside this function to ensure both RL and Baseline use the same traffic.
-    # total_vehicles_in_sim is now passed as an argument.
-
     sumo_bin = "sumo" if nogui else "sumo-gui"
     sumo_cmd = [
-        sumo_bin,
-        "-c", sumo_cfg_path,
-        "--start",
-        "--quit-on-end",
-        "--no-warnings",
-        "--no-step-log",
-        "--tripinfo-output", tripinfo_path # Added tripinfo output
+        sumo_bin, "-c", sumo_cfg_path, "--start", "--quit-on-end",
+        "--no-warnings", "--no-step-log", "--tripinfo-output", tripinfo_path
     ]
 
     agent = None
     if not use_baseline:
         if not model_path or not os.path.exists(model_path):
             print(f"[ERROR] Model not found at '{model_path}'")
-            # Return None for all expected values
-            return None, None, None, None, None, None
+            return None, None, None, None, None
 
         print(f"Loading model: {os.path.basename(model_path)}")
-        agent = TrafficLightAgent(state_dim=18, action_dim=2, device=DEVICE)
+        # Action dim is 4 to choose a phase directly
+        agent = TrafficLightAgent(state_dim=18, action_dim=4, device=DEVICE)
         agent.model.load_state_dict(torch.load(model_path, map_location=DEVICE))
         agent.model.eval()
 
-    waits_per_step = []
     total_reward = 0
+    step_stats = {
+        'avg_wait': [],
+        'min_wait': [],
+        'max_wait': [],
+        'completed': [],
+        'current_vehs': []
+    }
+    cumulative_completed = 0
+
+    def collect_stats():
+        nonlocal cumulative_completed
+        ids = traci.vehicle.getIDList()
+        if ids:
+            waits = [traci.vehicle.getWaitingTime(v) for v in ids]
+            avg_w = np.mean(waits)
+            min_w = np.min(waits)
+            max_w = np.max(waits)
+        else:
+            avg_w, min_w, max_w = 0, 0, 0
+        
+        cumulative_completed += traci.simulation.getArrivedNumber()
+        
+        step_stats['avg_wait'].append(avg_w)
+        step_stats['min_wait'].append(min_w)
+        step_stats['max_wait'].append(max_w)
+        step_stats['completed'].append(cumulative_completed)
+        step_stats['current_vehs'].append(len(ids))
 
     try:
         if traci.isLoaded():
             traci.close()
-
         traci.start(sumo_cmd)
 
         step = 0
-        last_phase_time = 0
-        previous_avg_wait = 0.0
+        time_in_phase = 0
+        current_green_phase = traci.trafficlight.getPhase('J1')
 
         while step < 1000:
-            current_phase_id = traci.trafficlight.getPhase('J1')
-
-            # --- Control Logic ---
             if use_baseline:
-                if current_phase_id in ALLOWED_PHASES:
-                    if last_phase_time >= BASELINE_GREEN_TIME:
-                        traci.trafficlight.setPhase('J1', current_phase_id + 1)
-                        last_phase_time = 0
-                else:
-                    if last_phase_time >= YELLOW_TIME:
-                        next_green_phase = (current_phase_id + 1) % 8
-                        traci.trafficlight.setPhase('J1', next_green_phase)
-                        last_phase_time = 0
+                # --- Baseline Fixed-Time Logic ---
+                current_phase_id = traci.trafficlight.getPhase('J1')
+                if current_phase_id in GREEN_PHASES:
+                    if time_in_phase >= BASELINE_GREEN_TIME:
+                        traci.trafficlight.setPhase(
+                            'J1', YELLOW_PHASES[current_phase_id])
+                        time_in_phase = 0
+                else:  # Yellow Phase
+                    if time_in_phase >= YELLOW_TIME:
+                        # Awkward but functional way to get next green phase
+                        next_green_phase_idx = (
+                            GREEN_PHASES.index(current_green_phase) + 1) % len(GREEN_PHASES)
+                        current_green_phase = GREEN_PHASES[next_green_phase_idx]
+                        traci.trafficlight.setPhase(
+                            'J1', current_green_phase)
+                        time_in_phase = 0
+                traci.simulationStep()
+                collect_stats()
+                step += 1
+                time_in_phase += 1
             else:
-                if current_phase_id in ALLOWED_PHASES:
-                    state = get_state(last_phase_time, current_phase_id)
-                    action = agent.select_action(state, epsilon=0.0)
-                    if action == 1:
-                        traci.trafficlight.setPhase('J1', current_phase_id + 1)
-                        last_phase_time = 0
+                # --- RL Action-Commitment Logic ---
+                state = get_state(time_in_phase, current_green_phase)
+                wait_at_start_of_chunk = sum(
+                    traci.vehicle.getWaitingTime(v_id) for v_id in traci.vehicle.getIDList())
 
-            traci.simulationStep()
-            step += 1
-            last_phase_time += 1
+                action = agent.select_action(state, epsilon=0.0)  # Epsilon is 0 for eval
+                chosen_phase = GREEN_PHASES[action]
 
-            # --- Per-vehicle waiting time ---
-            vehicle_ids = traci.vehicle.getIDList()
-            num_vehicles = len(vehicle_ids)
+                if chosen_phase != current_green_phase:
+                    traci.trafficlight.setPhase(
+                        'J1', YELLOW_PHASES[current_green_phase])
+                    for _ in range(YELLOW_TIME):
+                        if step >= 1000:
+                            break
+                        traci.simulationStep()
+                        collect_stats()
+                        step += 1
 
-            if num_vehicles > 0:
-                total_wait = sum(
-                    traci.vehicle.getWaitingTime(v) for v in vehicle_ids
-                )
-                avg_wait = total_wait / num_vehicles
-            else:
-                avg_wait = 0.0
+                traci.trafficlight.setPhase('J1', chosen_phase)
+                current_green_phase = chosen_phase
+                time_in_phase = 0
+                for _ in range(ACTION_COMMIT_TIME):
+                    if step >= 1000:
+                        break
+                    traci.simulationStep()
+                    collect_stats()
+                    step += 1
+                    time_in_phase += 1
+                
+                wait_at_end_of_chunk = sum(
+                    traci.vehicle.getWaitingTime(v_id) for v_id in traci.vehicle.getIDList())
+                
+                chunk_reward = (wait_at_start_of_chunk - wait_at_end_of_chunk) / 100.0
+                total_reward += chunk_reward
 
-            waits_per_step.append(avg_wait)
-
-            # Reward = reduction in per-vehicle wait
-            reward = previous_avg_wait - avg_wait
-            previous_avg_wait = avg_wait
-            total_reward += reward
 
     except Exception as e:
         print(f"[ERROR] Simulation failed: {e}")
+        import traceback
+        traceback.print_exc()
         return None, None, None, None, None, None
 
     finally:
         if traci.isLoaded():
             traci.close()
 
-    # Get stats from tripinfo after closing traci
     avg_wait, max_wait, min_wait, completed_vehicles = get_stats_from_tripinfo(
         tripinfo_path)
 
     print(
-        f"Evaluation complete. Total Reward: {total_reward:.2f}, "
+        f"Evaluation complete. "
+        f"Total Reward: {total_reward:.2f}, "
         f"Avg Wait: {avg_wait:.2f}s, Completed Vehicles: {completed_vehicles}"
     )
 
-    return waits_per_step, total_reward, avg_wait, max_wait, min_wait, completed_vehicles
+    return total_reward, avg_wait, max_wait, min_wait, completed_vehicles, step_stats
 
 def plot_waits_comparison(waits_rl, waits_baseline, save_path):
 
@@ -212,7 +257,10 @@ def plot_waits_comparison(waits_rl, waits_baseline, save_path):
     waits_rl = np.array(waits_rl)
     waits_baseline = np.array(waits_baseline)
 
-    x = np.arange(len(waits_rl))
+    # Ensure they have the same length for plotting if needed, 
+    # but plt.plot can handle different lengths.
+    x_rl = np.arange(len(waits_rl))
+    x_base = np.arange(len(waits_baseline))
 
     # Stats
     rl_mean = np.mean(waits_rl)
@@ -224,18 +272,16 @@ def plot_waits_comparison(waits_rl, waits_baseline, save_path):
     plt.figure(figsize=(12, 6))
 
     # RL Curve
-    plt.plot(x, waits_rl, label="RL", linewidth=1.5)
-    plt.axhline(rl_mean, linestyle="--", label="RL Mean")
-    plt.axhline(rl_median, linestyle=":", label="RL Median")
+    plt.plot(x_rl, waits_rl, label="RL", linewidth=1.0, alpha=0.7)
+    plt.axhline(rl_mean, color='blue', linestyle="--", label=f"RL Mean ({rl_mean:.2f}s)")
 
     # Baseline Curve
-    plt.plot(x, waits_baseline, label="Baseline", linewidth=1.5)
-    plt.axhline(base_mean, linestyle="--", label="Baseline Mean")
-    plt.axhline(base_median, linestyle=":", label="Baseline Median")
+    plt.plot(x_base, waits_baseline, label="Baseline", linewidth=1.0, alpha=0.7)
+    plt.axhline(base_mean, color='orange', linestyle="--", label=f"Baseline Mean ({base_mean:.2f}s)")
 
     plt.xlabel("Simulation Step")
     plt.ylabel("Average Waiting Time Per Vehicle (s)")
-    plt.title("Per-Vehicle Waiting Time Comparison")
+    plt.title("Per-Vehicle Waiting Time Comparison (Current Vehicles)")
     plt.legend()
     plt.grid(True, linestyle="--", linewidth=0.5)
     plt.tight_layout()
@@ -251,29 +297,33 @@ def plot_additional_stats(avg_wait_times, min_wait_times, max_wait_times,
                           completed_vehicles, total_vehicles, remaining_vehicles, save_path):
     plt.figure(figsize=(12, 5))
 
+    steps = range(len(avg_wait_times))
+
     # Plot 1: Average Waiting Time with Min/Max Range
     plt.subplot(1, 2, 1)
-    episodes = range(len(avg_wait_times))
-    plt.plot(episodes, avg_wait_times, label="Avg. Waiting Time", color="green")
-    plt.fill_between(episodes, min_wait_times, max_wait_times,
+    plt.plot(steps, avg_wait_times, label="Avg. Waiting Time", color="green")
+    plt.fill_between(steps, min_wait_times, max_wait_times,
                      color='green', alpha=0.2, label="Min/Max Wait")
-    plt.xlabel("Episode")
+    plt.xlabel("Simulation Step")
     plt.ylabel("Waiting Time (s)")
-    plt.title("Waiting Time Statistics per Episode")
+    plt.title("Waiting Time Statistics over Time")
     plt.legend()
     plt.grid()
 
     # Plot 2: Vehicle Throughput
     plt.subplot(1, 2, 2)
-    plt.plot(episodes, total_vehicles,
-             label="Total Vehicles in Sim", color="blue", linestyle='--')
-    plt.plot(episodes, completed_vehicles,
+    if len(total_vehicles) == 1:
+        total_vehicles = [total_vehicles[0]] * len(steps)
+    
+    plt.plot(steps, total_vehicles,
+             label="Total Vehicles Planned", color="blue", linestyle='--')
+    plt.plot(steps, completed_vehicles,
              label="Completed Vehicles", color="purple")
-    plt.plot(episodes, remaining_vehicles,
+    plt.plot(steps, remaining_vehicles,
              label="Remaining Vehicles", color="red", linestyle=':')
-    plt.xlabel("Episode")
+    plt.xlabel("Simulation Step")
     plt.ylabel("Number of Vehicles")
-    plt.title("Vehicle Throughput per Episode")
+    plt.title("Vehicle Throughput over Time")
     plt.legend()
     plt.grid()
 
@@ -336,23 +386,21 @@ def main():
                 print(
                     f"  [WARNING] No model file (.pth) found for '{experiment}'. Skipping.")
                 continue
+            # Default to the first model found
             model_path = os.path.join(model_dir, model_files[0])
 
         sumo_config_base = os.path.normpath(
             os.path.join(SCRIPT_DIR, "../sumo_config"))
         route_file_path = os.path.join(sumo_config_base, "hello.rou.xml")
-        tripinfo_path = os.path.join(
-            RESULTS_DIR, experiment, f"tripinfo_{experiment}.xml")
+        tripinfo_path_rl = os.path.join(
+            RESULTS_DIR, experiment, f"tripinfo_rl_{experiment}.xml")
+        tripinfo_path_base = os.path.join(
+            RESULTS_DIR, experiment, f"tripinfo_base_{experiment}.xml")
 
-        # Ensure results directory exists for this experiment
         os.makedirs(os.path.join(RESULTS_DIR, experiment), exist_ok=True)
 
-        # Generate routes once for the experiment, both RL and baseline will use this traffic
         total_vehicles_in_sim = generate_routes(experiment, route_file_path)
-
-        plot_comparison_filename = f"comparison_plot{args.suffix}.png"
-        result_plot_path = os.path.join(
-            RESULTS_DIR, experiment, plot_comparison_filename)
+        print(f"Generated routes for '{experiment}' with approx. {int(total_vehicles_in_sim)} vehicles.")
 
         stats_plot_rl_filename = f"stats_rl{args.suffix}.png"
         stats_plot_rl_path = os.path.join(
@@ -361,41 +409,55 @@ def main():
         stats_plot_baseline_filename = f"stats_baseline{args.suffix}.png"
         stats_plot_baseline_path = os.path.join(
             RESULTS_DIR, experiment, stats_plot_baseline_filename)
+        
+        comparison_plot_filename = f"comparison_waits{args.suffix}.png"
+        comparison_plot_path = os.path.join(
+            RESULTS_DIR, experiment, comparison_plot_filename)
 
         print("\n[1/2] Running evaluation with RL Agent...")
-        waits_rl, reward_rl, avg_wait_rl, max_wait_rl, min_wait_rl, completed_rl = run_evaluation(
-            experiment, model_path, args.nogui, use_baseline=False, tripinfo_path=tripinfo_path)
+        reward_rl, avg_wait_rl, max_wait_rl, min_wait_rl, completed_rl, step_stats_rl = run_evaluation(
+            experiment, model_path, args.nogui, use_baseline=False, tripinfo_path=tripinfo_path_rl)
 
         print("\n[2/2] Running evaluation with Fixed-Time Baseline...")
-        waits_base, reward_base, avg_wait_base, max_wait_base, min_wait_base, completed_base = run_evaluation(
-            experiment, model_path=None, nogui=args.nogui, use_baseline=True, tripinfo_path=tripinfo_path)
+        reward_base, avg_wait_base, max_wait_base, min_wait_base, completed_base, step_stats_base = run_evaluation(
+            experiment, model_path=None, nogui=args.nogui, use_baseline=True, tripinfo_path=tripinfo_path_base)
 
         print("\n--- Summary ---")
-        plot_waits_comparison(waits_rl, waits_base, result_plot_path)
 
-        if all(x is not None for x in [avg_wait_rl, min_wait_rl, max_wait_rl, completed_rl]):
-            remaining_rl = total_vehicles_in_sim - completed_rl
+        if step_stats_rl is not None:
+            remaining_rl_ts = [total_vehicles_in_sim - c for c in step_stats_rl['completed']]
             plot_additional_stats(
-                [avg_wait_rl], [min_wait_rl], [max_wait_rl],
-                [completed_rl], [total_vehicles_in_sim], [remaining_rl],
+                step_stats_rl['avg_wait'], step_stats_rl['min_wait'], step_stats_rl['max_wait'],
+                step_stats_rl['completed'], [total_vehicles_in_sim], remaining_rl_ts,
                 stats_plot_rl_path
             )
-            print(f"  RL Metrics - Avg Wait: {avg_wait_rl:.2f}s, Completed: {completed_rl}/{total_vehicles_in_sim}, Remaining: {remaining_rl}")
+            print(
+                f"  RL Metrics - Reward: {reward_rl:.2f}, Avg Wait (TripInfo): {avg_wait_rl:.2f}s, "
+                f"Completed: {completed_rl}/{int(total_vehicles_in_sim)}"
+            )
 
-        if all(x is not None for x in [avg_wait_base, min_wait_base, max_wait_base, completed_base]):
-            remaining_base = total_vehicles_in_sim - completed_base
+        if step_stats_base is not None:
+            remaining_base_ts = [total_vehicles_in_sim - c for c in step_stats_base['completed']]
             plot_additional_stats(
-                [avg_wait_base], [min_wait_base], [max_wait_base],
-                [completed_base], [total_vehicles_in_sim], [remaining_base],
+                step_stats_base['avg_wait'], step_stats_base['min_wait'], step_stats_base['max_wait'],
+                step_stats_base['completed'], [total_vehicles_in_sim], remaining_base_ts,
                 stats_plot_baseline_path
             )
-            print(f"  Baseline Metrics - Avg Wait: {avg_wait_base:.2f}s, Completed: {completed_base}/{total_vehicles_in_sim}, Remaining: {remaining_base}")
-
-        if reward_rl is not None and reward_base is not None:
-            print(f"  Total Reward (RL): {reward_rl:.2f}")
-            print(f"  Total Reward (Baseline): {reward_base:.2f}")
+            print(
+                f"  Baseline Metrics - Reward: {reward_base:.2f}, Avg Wait (TripInfo): {avg_wait_base:.2f}s, "
+                f"Completed: {completed_base}/{int(total_vehicles_in_sim)}"
+            )
+        
+        if step_stats_rl is not None and step_stats_base is not None:
+            plot_waits_comparison(
+                step_stats_rl['avg_wait'], step_stats_base['avg_wait'], 
+                comparison_plot_path
+            )
 
         print("-" * (29 + len(experiment)) + "\n")
+
+if __name__ == "__main__":
+    main()
 
 if __name__ == "__main__":
     main()
