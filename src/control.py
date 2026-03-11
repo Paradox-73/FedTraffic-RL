@@ -139,85 +139,49 @@ def get_state(last_phase_time, current_phase):
 def plot_rewards(rewards, losses, save_path):
     plt.figure(figsize=(12, 5))
 
+    # Calculate moving averages (window size = 10)
+    window = 10
+
+    def moving_avg(data, window_size):
+        if len(data) < window_size:
+            return []
+        return np.convolve(data, np.ones(window_size)/window_size, mode='valid')
+
+    rewards_ma = moving_avg(rewards, window)
+    losses_ma = moving_avg(losses, window)
+
     plt.subplot(1, 2, 1)
-    plt.plot(rewards, label="Episode Reward")
+    plt.plot(rewards, label="Raw Reward", alpha=0.3)
+    if len(rewards_ma) > 0:
+        plt.plot(range(window-1, len(rewards)), rewards_ma,
+                 label=f"MA (win={window})", color="blue", linewidth=2)
     plt.xlabel("Episode")
     plt.ylabel("Total Reward")
-    plt.title("Training Rewards")
+    plt.title("Training Rewards (Smoothed)")
     plt.legend()
-    plt.grid()
+    plt.grid(True, linestyle='--', alpha=0.6)
 
     plt.subplot(1, 2, 2)
-    plt.plot(losses, label="Avg Loss", color="orange")
+    plt.plot(losses, label="Raw Loss", color="orange", alpha=0.3)
+    if len(losses_ma) > 0:
+        plt.plot(range(window-1, len(losses)), losses_ma,
+                 label=f"MA (win={window})", color="red", linewidth=2)
     plt.xlabel("Episode")
     plt.ylabel("Loss")
-    plt.title("Training Loss")
+    plt.title("Training Loss (Smoothed)")
     plt.legend()
-    plt.grid()
+    plt.grid(True, linestyle='--', alpha=0.6)
 
+    plt.tight_layout()
     plt.savefig(save_path)
     plt.close()
     print(f"Plot saved to: {save_path}")
 
 
-def plot_additional_stats(avg_wait_times, min_wait_times, max_wait_times,
-                          completed_vehicles, total_vehicles, remaining_vehicles, save_path):
-    plt.figure(figsize=(12, 5))
-
-    # Plot 1: Average Waiting Time with Min/Max Range
-    plt.subplot(1, 2, 1)
-    episodes = range(len(avg_wait_times))
-    plt.plot(episodes, avg_wait_times,
-             label="Avg. Waiting Time", color="green")
-    plt.fill_between(episodes, min_wait_times, max_wait_times,
-                     color='green', alpha=0.2, label="Min/Max Wait")
-    plt.xlabel("Episode")
-    plt.ylabel("Waiting Time (s)")
-    plt.title("Waiting Time Statistics per Episode")
-    plt.legend()
-    plt.grid()
-
-    # Plot 2: Vehicle Throughput
-    plt.subplot(1, 2, 2)
-    plt.plot(episodes, total_vehicles,
-             label="Total Vehicles in Sim", color="blue", linestyle='--')
-    plt.plot(episodes, completed_vehicles,
-             label="Completed Vehicles", color="purple")
-    plt.plot(episodes, remaining_vehicles,
-             label="Remaining Vehicles", color="red", linestyle=':')
-    plt.xlabel("Episode")
-    plt.ylabel("Number of Vehicles")
-    plt.title("Vehicle Throughput per Episode")
-    plt.legend()
-    plt.grid()
-
-    plt.tight_layout()
-    plt.savefig(save_path)
-    plt.close()
-    print(f"Additional stats plot saved to: {save_path}")
-
-
-def plot_waits_comparison(waits_rl, waits_baseline, save_path):
-    """Plot per-step total waiting time for RL vs fixed schedule."""
-    steps = range(len(waits_rl))
-    plt.figure(figsize=(12, 5))
-    plt.plot(steps, waits_rl, label="RL Model", color="tab:blue")
-    plt.plot(steps, waits_baseline,
-             label="Fixed 90s Baseline", color="tab:orange")
-    plt.xlabel("Simulation Step")
-    plt.ylabel("Total Waiting Time (s)")
-    plt.title("Intersection Performance: RL vs Fixed Cycle")
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(save_path)
-    plt.close()
-
-
 def get_stats_from_tripinfo(filepath):
-    """Parses a SUMO tripinfo XML and returns avg, max, min waiting times and completed vehicle count."""
+    """Parses a SUMO tripinfo XML and returns stats and raw wait times."""
     if not os.path.exists(filepath):
-        return 0, 0, 0, 0
+        return 0, 0, 0, 0, []
 
     tree = ET.parse(filepath)
     root = tree.getroot()
@@ -226,14 +190,14 @@ def get_stats_from_tripinfo(filepath):
                   for trip in root.findall("tripinfo")]
 
     if not wait_times:
-        return 0, 0, 0, 0
+        return 0, 0, 0, 0, []
 
     avg_wait = np.mean(wait_times)
     max_wait = np.max(wait_times)
     min_wait = np.min(wait_times)
     completed_vehicles = len(wait_times)
 
-    return avg_wait, max_wait, min_wait, completed_vehicles
+    return avg_wait, max_wait, min_wait, completed_vehicles, wait_times
 
 
 def run(experiment_name, args):
@@ -345,8 +309,8 @@ def run(experiment_name, args):
                 current_total_wait = sum(
                     traci.vehicle.getWaitingTime(v_id) for v_id in vehicle_ids)
 
-                # reward = (previous_total_wait - current_total_wait) / 100.0
-                reward = -(current_total_wait) / 100
+                reward = (previous_total_wait - current_total_wait) / 100.0
+                # reward = -(current_total_wait) / 100
                 previous_total_wait = current_total_wait
 
                 agent.remember(state, action, reward, next_state, step >= 1000)
@@ -358,7 +322,7 @@ def run(experiment_name, args):
 
             traci.close()
 
-            avg_wait, max_wait, min_wait, completed_vehicles = get_stats_from_tripinfo(
+            avg_wait, max_wait, min_wait, completed_vehicles, _ = get_stats_from_tripinfo(
                 tripinfo_path)
             all_avg_wait_times.append(avg_wait)
             all_max_wait_times.append(max_wait)
@@ -367,7 +331,7 @@ def run(experiment_name, args):
             remaining_vehicles = total_vehicles_in_sim - completed_vehicles
             all_remaining_vehicles.append(remaining_vehicles)
 
-            if (episode + 1) % 10 == 0:
+            if (episode + 1) % 2 == 0:
                 agent.update_target_network()
 
             epsilon = max(0.01, epsilon * 0.995)
@@ -385,9 +349,6 @@ def run(experiment_name, args):
         torch.save(agent.model.state_dict(), model_path)
         print(f"Model saved to: {model_path}")
         plot_rewards(all_rewards, all_avg_losses, plot_path)
-        plot_additional_stats(
-            all_avg_wait_times, all_min_wait_times, all_max_wait_times,
-            all_completed_vehicles, all_total_vehicles, all_remaining_vehicles, stats_plot_path)
 
     except Exception as e:
         print(f"Fatal error: {e}")

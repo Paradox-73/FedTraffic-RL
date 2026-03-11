@@ -85,9 +85,9 @@ def get_state(last_phase_time, current_phase):
 
 
 def get_stats_from_tripinfo(filepath):
-    """Parses a SUMO tripinfo XML and returns avg, max, min waiting times and completed vehicle count."""
+    """Parses a SUMO tripinfo XML and returns stats and raw wait times."""
     if not os.path.exists(filepath):
-        return 0, 0, 0, 0
+        return 0, 0, 0, 0, []
 
     tree = ET.parse(filepath)
     root = tree.getroot()
@@ -96,14 +96,14 @@ def get_stats_from_tripinfo(filepath):
                   for trip in root.findall("tripinfo")]
 
     if not wait_times:
-        return 0, 0, 0, 0
+        return 0, 0, 0, 0, []
 
     avg_wait = np.mean(wait_times)
     max_wait = np.max(wait_times)
     min_wait = np.min(wait_times)
     completed_vehicles = len(wait_times)
 
-    return avg_wait, max_wait, min_wait, completed_vehicles
+    return avg_wait, max_wait, min_wait, completed_vehicles, wait_times
 
 
 def run_evaluation(experiment_name, model_path, nogui, use_baseline=False, tripinfo_path=None):
@@ -122,42 +122,42 @@ def run_evaluation(experiment_name, model_path, nogui, use_baseline=False, tripi
     if not use_baseline:
         if not model_path or not os.path.exists(model_path):
             print(f"[ERROR] Model not found at '{model_path}'")
-            return None, None, None, None, None
+            return None, None, None, None, None, None
 
         print(f"Loading model: {os.path.basename(model_path)}")
-        # Action dim is 4 to choose a phase directly
         agent = TrafficLightAgent(state_dim=18, action_dim=4, device=DEVICE)
         agent.model.load_state_dict(torch.load(model_path, map_location=DEVICE))
         agent.model.eval()
 
     total_reward = 0
     step_stats = {
-        'avg_wait': [],
-        'min_wait': [],
-        'max_wait': [],
-        'completed': [],
-        'current_vehs': []
+        'total_wait': [],
+        'queue_length': [],
+        'active_phase': [],
+        'completed': []
     }
     cumulative_completed = 0
 
     def collect_stats():
         nonlocal cumulative_completed
         ids = traci.vehicle.getIDList()
-        if ids:
-            waits = [traci.vehicle.getWaitingTime(v) for v in ids]
-            avg_w = np.mean(waits)
-            min_w = np.min(waits)
-            max_w = np.max(waits)
-        else:
-            avg_w, min_w, max_w = 0, 0, 0
+        
+        # 1. Total waiting time at this step
+        total_w = sum(traci.vehicle.getWaitingTime(v) for v in ids)
+        
+        # 2. Total halting vehicles (queue length)
+        incoming_edges = ["edge_N_in", "edge_S_in", "edge_E_in", "edge_W_in"]
+        queue_len = sum(traci.edge.getLastStepHaltingNumber(e) for e in incoming_edges)
+        
+        # 3. Active phase
+        active_p = traci.trafficlight.getPhase('J1')
         
         cumulative_completed += traci.simulation.getArrivedNumber()
         
-        step_stats['avg_wait'].append(avg_w)
-        step_stats['min_wait'].append(min_w)
-        step_stats['max_wait'].append(max_w)
+        step_stats['total_wait'].append(total_w)
+        step_stats['queue_length'].append(queue_len)
+        step_stats['active_phase'].append(active_p)
         step_stats['completed'].append(cumulative_completed)
-        step_stats['current_vehs'].append(len(ids))
 
     try:
         if traci.isLoaded():
@@ -179,7 +179,6 @@ def run_evaluation(experiment_name, model_path, nogui, use_baseline=False, tripi
                         time_in_phase = 0
                 else:  # Yellow Phase
                     if time_in_phase >= YELLOW_TIME:
-                        # Awkward but functional way to get next green phase
                         next_green_phase_idx = (
                             GREEN_PHASES.index(current_green_phase) + 1) % len(GREEN_PHASES)
                         current_green_phase = GREEN_PHASES[next_green_phase_idx]
@@ -196,15 +195,14 @@ def run_evaluation(experiment_name, model_path, nogui, use_baseline=False, tripi
                 wait_at_start_of_chunk = sum(
                     traci.vehicle.getWaitingTime(v_id) for v_id in traci.vehicle.getIDList())
 
-                action = agent.select_action(state, epsilon=0.0)  # Epsilon is 0 for eval
+                action = agent.select_action(state, epsilon=0.0)
                 chosen_phase = GREEN_PHASES[action]
 
                 if chosen_phase != current_green_phase:
                     traci.trafficlight.setPhase(
                         'J1', YELLOW_PHASES[current_green_phase])
                     for _ in range(YELLOW_TIME):
-                        if step >= 1000:
-                            break
+                        if step >= 1000: break
                         traci.simulationStep()
                         collect_stats()
                         step += 1
@@ -213,8 +211,7 @@ def run_evaluation(experiment_name, model_path, nogui, use_baseline=False, tripi
                 current_green_phase = chosen_phase
                 time_in_phase = 0
                 for _ in range(ACTION_COMMIT_TIME):
-                    if step >= 1000:
-                        break
+                    if step >= 1000: break
                     traci.simulationStep()
                     collect_stats()
                     step += 1
@@ -222,242 +219,143 @@ def run_evaluation(experiment_name, model_path, nogui, use_baseline=False, tripi
                 
                 wait_at_end_of_chunk = sum(
                     traci.vehicle.getWaitingTime(v_id) for v_id in traci.vehicle.getIDList())
-                
                 chunk_reward = (wait_at_start_of_chunk - wait_at_end_of_chunk) / 100.0
                 total_reward += chunk_reward
-
 
     except Exception as e:
         print(f"[ERROR] Simulation failed: {e}")
         import traceback
         traceback.print_exc()
         return None, None, None, None, None, None
-
     finally:
-        if traci.isLoaded():
-            traci.close()
+        if traci.isLoaded(): traci.close()
 
-    avg_wait, max_wait, min_wait, completed_vehicles = get_stats_from_tripinfo(
-        tripinfo_path)
+    avg_wait, max_wait, min_wait, completed_vehicles, wait_times = get_stats_from_tripinfo(tripinfo_path)
 
-    print(
-        f"Evaluation complete. "
-        f"Total Reward: {total_reward:.2f}, "
-        f"Avg Wait: {avg_wait:.2f}s, Completed Vehicles: {completed_vehicles}"
-    )
+    print(f"Evaluation complete. Reward: {total_reward:.2f}, Avg Wait: {avg_wait:.2f}s, Completed: {completed_vehicles}")
+    return total_reward, avg_wait, max_wait, min_wait, completed_vehicles, step_stats, wait_times
 
-    return total_reward, avg_wait, max_wait, min_wait, completed_vehicles, step_stats
 
-def plot_waits_comparison(waits_rl, waits_baseline, save_path):
-
-    if waits_rl is None or waits_baseline is None:
-        print("Skipping plot due to missing data.")
-        return
-
-    waits_rl = np.array(waits_rl)
-    waits_baseline = np.array(waits_baseline)
-
-    # Ensure they have the same length for plotting if needed, 
-    # but plt.plot can handle different lengths.
-    x_rl = np.arange(len(waits_rl))
-    x_base = np.arange(len(waits_baseline))
-
-    # Stats
-    rl_mean = np.mean(waits_rl)
-    rl_median = np.median(waits_rl)
-
-    base_mean = np.mean(waits_baseline)
-    base_median = np.median(waits_baseline)
-
-    plt.figure(figsize=(12, 6))
-
-    # RL Curve
-    plt.plot(x_rl, waits_rl, label="RL", linewidth=1.0, alpha=0.7)
-    plt.axhline(rl_mean, color='blue', linestyle="--", label=f"RL Mean ({rl_mean:.2f}s)")
-
-    # Baseline Curve
-    plt.plot(x_base, waits_baseline, label="Baseline", linewidth=1.0, alpha=0.7)
-    plt.axhline(base_mean, color='orange', linestyle="--", label=f"Baseline Mean ({base_mean:.2f}s)")
-
+def plot_cumulative_waiting_time(waits_rl, waits_base, save_path):
+    plt.figure(figsize=(10, 6))
+    plt.plot(np.cumsum(waits_rl), label="RL Agent", color="blue", linewidth=2)
+    plt.plot(np.cumsum(waits_base), label="Baseline", color="orange", linewidth=2)
     plt.xlabel("Simulation Step")
-    plt.ylabel("Average Waiting Time Per Vehicle (s)")
-    plt.title("Per-Vehicle Waiting Time Comparison (Current Vehicles)")
+    plt.ylabel("Cumulative Waiting Time (s)")
+    plt.title("Cumulative Waiting Time Comparison")
     plt.legend()
-    plt.grid(True, linestyle="--", linewidth=0.5)
+    plt.grid(True, linestyle='--', alpha=0.7)
     plt.tight_layout()
-
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path)
     plt.close()
 
-    print(f"Comparison plot saved to: {save_path}")
 
-
-def plot_additional_stats(avg_wait_times, min_wait_times, max_wait_times,
-                          completed_vehicles, total_vehicles, remaining_vehicles, save_path):
-    plt.figure(figsize=(12, 5))
-
-    steps = range(len(avg_wait_times))
-
-    # Plot 1: Average Waiting Time with Min/Max Range
-    plt.subplot(1, 2, 1)
-    plt.plot(steps, avg_wait_times, label="Avg. Waiting Time", color="green")
-    plt.fill_between(steps, min_wait_times, max_wait_times,
-                     color='green', alpha=0.2, label="Min/Max Wait")
-    plt.xlabel("Simulation Step")
-    plt.ylabel("Waiting Time (s)")
-    plt.title("Waiting Time Statistics over Time")
-    plt.legend()
-    plt.grid()
-
-    # Plot 2: Vehicle Throughput
-    plt.subplot(1, 2, 2)
-    if len(total_vehicles) == 1:
-        total_vehicles = [total_vehicles[0]] * len(steps)
+def plot_queue_length(queues_rl, queues_base, save_path):
+    plt.figure(figsize=(10, 6))
+    plt.plot(queues_rl, label="RL Agent", color="blue", alpha=0.4)
+    plt.plot(queues_base, label="Baseline", color="orange", alpha=0.4)
     
-    plt.plot(steps, total_vehicles,
-             label="Total Vehicles Planned", color="blue", linestyle='--')
-    plt.plot(steps, completed_vehicles,
-             label="Completed Vehicles", color="purple")
-    plt.plot(steps, remaining_vehicles,
-             label="Remaining Vehicles", color="red", linestyle=':')
+    # Add smoothed lines
+    window = 20
+    if len(queues_rl) > window:
+        rl_ma = np.convolve(queues_rl, np.ones(window)/window, mode='valid')
+        base_ma = np.convolve(queues_base, np.ones(window)/window, mode='valid')
+        plt.plot(range(window-1, len(queues_rl)), rl_ma, color="darkblue", linewidth=2, label="RL (MA)")
+        plt.plot(range(window-1, len(queues_base)), base_ma, color="darkorange", linewidth=2, label="Baseline (MA)")
+    
     plt.xlabel("Simulation Step")
-    plt.ylabel("Number of Vehicles")
-    plt.title("Vehicle Throughput over Time")
+    plt.ylabel("Total Queue Length (Vehicles)")
+    plt.title("Queue Length vs. Simulation Step (Halted Vehicles)")
     plt.legend()
-    plt.grid()
-
+    plt.grid(True, linestyle='--', alpha=0.7)
     plt.tight_layout()
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path)
     plt.close()
-    print(f"Additional stats plot saved to: {save_path}")
+
+
+def plot_waiting_time_distribution(trips_rl, trips_base, save_path):
+    plt.figure(figsize=(8, 6))
+    plt.boxplot([trips_rl, trips_base], labels=["RL Agent", "Baseline"], patch_artist=True,
+                boxprops=dict(facecolor='lightblue', color='blue'),
+                medianprops=dict(color='red'))
+    plt.ylabel("Waiting Time (s)")
+    plt.title("Waiting Time Distribution (Completed Vehicles)")
+    plt.grid(True, axis='y', linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+
+
+def plot_phase_timeline(phases_rl, phases_base, save_path):
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+    phase_labels = {0: 'N Green', 1: 'N Yellow', 2: 'E Green', 3: 'E Yellow',
+                    4: 'S Green', 5: 'S Yellow', 6: 'W Green', 7: 'W Yellow'}
+    
+    def plot_timeline(ax, phases, title):
+        phases = np.array(phases)
+        changes = np.where(np.diff(phases) != 0)[0] + 1
+        starts = np.insert(changes, 0, 0)
+        ends = np.append(changes, len(phases))
+        colors = {0: 'lime', 1: 'gold', 2: 'forestgreen', 3: 'khaki', 
+                  4: 'green', 5: 'darkkhaki', 6: 'darkgreen', 7: 'olive'}
+        for start, end in zip(starts, ends):
+            phase = phases[start]
+            ax.broken_barh([(start, end-start)], (phase, 0.8), facecolors=colors.get(phase, 'gray'))
+        ax.set_yticks([i + 0.4 for i in range(8)])
+        ax.set_yticklabels([phase_labels[i] for i in range(8)])
+        ax.set_title(title)
+        ax.grid(True, axis='x', linestyle='--', alpha=0.5)
+
+    plot_timeline(ax1, phases_rl, "RL Agent Phase Timeline")
+    plot_timeline(ax2, phases_base, "Baseline Phase Timeline")
+    plt.xlabel("Simulation Step")
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Evaluate a trained traffic control model.")
-    parser.add_argument("--experiment", type=str, default="all",
-                        help="Experiment name to evaluate, or 'all' to run all experiments.")
-    parser.add_argument("--model", type=str, default=None,
-                        help="Path to a specific .pth model file (optional). Overrides default model search.")
-    parser.add_argument("--suffix", type=str, default="",
-                        help="Optional suffix to append to the plot filename (e.g., '_custom').")
-    parser.add_argument("--nogui", action="store_true",
-                        help="Run SUMO without the GUI.")
+    parser = argparse.ArgumentParser(description="Evaluate a trained traffic control model.")
+    parser.add_argument("--experiment", type=str, default="all", help="Experiment name or 'all'")
+    parser.add_argument("--model", type=str, default=None, help="Path to a specific .pth model file")
+    parser.add_argument("--suffix", type=str, default="", help="Suffix for plot filenames")
+    parser.add_argument("--nogui", action="store_true", help="Run SUMO without the GUI.")
     args = parser.parse_args()
 
     MODELS_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, "../models"))
     RESULTS_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, "../results"))
 
-    if not os.path.exists(MODELS_DIR):
-        print(f"Models directory not found at: {MODELS_DIR}")
-        sys.exit(1)
-
-    experiments_to_run = []
-    if args.experiment.lower() == 'all':
-        experiments_to_run = [d for d in os.listdir(
-            MODELS_DIR) if os.path.isdir(os.path.join(MODELS_DIR, d))]
-        if args.model:
-            print("[WARNING] --model argument is ignored when --experiment is 'all'.")
-    else:
-        experiments_to_run = [args.experiment]
-        if not os.path.isdir(os.path.join(MODELS_DIR, args.experiment)):
-            print(
-                f"[ERROR] Experiment '{args.experiment}' directory not found in {MODELS_DIR}.")
-            sys.exit(1)
-
-    if not experiments_to_run:
-        print(f"No experiments found to evaluate.")
-        sys.exit(0)
-
-    print(
-        f"Found {len(experiments_to_run)} experiments to evaluate: {experiments_to_run}\n")
+    experiments_to_run = [d for d in os.listdir(MODELS_DIR) if os.path.isdir(os.path.join(MODELS_DIR, d))] if args.experiment.lower() == 'all' else [args.experiment]
 
     for experiment in experiments_to_run:
         print(f"--- Evaluating Experiment: {experiment} ---")
-
-        model_path = args.model
-        if not model_path:
-            model_dir = os.path.join(MODELS_DIR, experiment)
-            model_files = [f for f in os.listdir(
-                model_dir) if f.endswith('.pth')]
-            if not model_files:
-                print(
-                    f"  [WARNING] No model file (.pth) found for '{experiment}'. Skipping.")
-                continue
-            # Default to the first model found
-            model_path = os.path.join(model_dir, model_files[0])
-
-        sumo_config_base = os.path.normpath(
-            os.path.join(SCRIPT_DIR, "../sumo_config"))
-        route_file_path = os.path.join(sumo_config_base, "hello.rou.xml")
-        tripinfo_path_rl = os.path.join(
-            RESULTS_DIR, experiment, f"tripinfo_rl_{experiment}.xml")
-        tripinfo_path_base = os.path.join(
-            RESULTS_DIR, experiment, f"tripinfo_base_{experiment}.xml")
-
+        model_dir = os.path.join(MODELS_DIR, experiment)
+        model_path = args.model or os.path.join(model_dir, [f for f in os.listdir(model_dir) if f.endswith('.pth')][0])
+        
+        sumo_config_base = os.path.normpath(os.path.join(SCRIPT_DIR, "../sumo_config"))
+        tripinfo_path_rl = os.path.join(RESULTS_DIR, experiment, f"tripinfo_rl_{experiment}.xml")
+        tripinfo_path_base = os.path.join(RESULTS_DIR, experiment, f"tripinfo_base_{experiment}.xml")
         os.makedirs(os.path.join(RESULTS_DIR, experiment), exist_ok=True)
 
-        total_vehicles_in_sim = generate_routes(experiment, route_file_path)
-        print(f"Generated routes for '{experiment}' with approx. {int(total_vehicles_in_sim)} vehicles.")
+        total_vehicles_in_sim = generate_routes(experiment, os.path.join(sumo_config_base, "hello.rou.xml"))
 
-        stats_plot_rl_filename = f"stats_rl{args.suffix}.png"
-        stats_plot_rl_path = os.path.join(
-            RESULTS_DIR, experiment, stats_plot_rl_filename)
-
-        stats_plot_baseline_filename = f"stats_baseline{args.suffix}.png"
-        stats_plot_baseline_path = os.path.join(
-            RESULTS_DIR, experiment, stats_plot_baseline_filename)
+        print("\n[1/2] Running RL Agent...")
+        res_rl = run_evaluation(experiment, model_path, args.nogui, False, tripinfo_path_rl)
         
-        comparison_plot_filename = f"comparison_waits{args.suffix}.png"
-        comparison_plot_path = os.path.join(
-            RESULTS_DIR, experiment, comparison_plot_filename)
+        print("\n[2/2] Running Baseline...")
+        res_base = run_evaluation(experiment, None, args.nogui, True, tripinfo_path_base)
 
-        print("\n[1/2] Running evaluation with RL Agent...")
-        reward_rl, avg_wait_rl, max_wait_rl, min_wait_rl, completed_rl, step_stats_rl = run_evaluation(
-            experiment, model_path, args.nogui, use_baseline=False, tripinfo_path=tripinfo_path_rl)
-
-        print("\n[2/2] Running evaluation with Fixed-Time Baseline...")
-        reward_base, avg_wait_base, max_wait_base, min_wait_base, completed_base, step_stats_base = run_evaluation(
-            experiment, model_path=None, nogui=args.nogui, use_baseline=True, tripinfo_path=tripinfo_path_base)
-
-        print("\n--- Summary ---")
-
-        if step_stats_rl is not None:
-            remaining_rl_ts = [total_vehicles_in_sim - c for c in step_stats_rl['completed']]
-            plot_additional_stats(
-                step_stats_rl['avg_wait'], step_stats_rl['min_wait'], step_stats_rl['max_wait'],
-                step_stats_rl['completed'], [total_vehicles_in_sim], remaining_rl_ts,
-                stats_plot_rl_path
-            )
-            print(
-                f"  RL Metrics - Reward: {reward_rl:.2f}, Avg Wait (TripInfo): {avg_wait_rl:.2f}s, "
-                f"Completed: {completed_rl}/{int(total_vehicles_in_sim)}"
-            )
-
-        if step_stats_base is not None:
-            remaining_base_ts = [total_vehicles_in_sim - c for c in step_stats_base['completed']]
-            plot_additional_stats(
-                step_stats_base['avg_wait'], step_stats_base['min_wait'], step_stats_base['max_wait'],
-                step_stats_base['completed'], [total_vehicles_in_sim], remaining_base_ts,
-                stats_plot_baseline_path
-            )
-            print(
-                f"  Baseline Metrics - Reward: {reward_base:.2f}, Avg Wait (TripInfo): {avg_wait_base:.2f}s, "
-                f"Completed: {completed_base}/{int(total_vehicles_in_sim)}"
-            )
-        
-        if step_stats_rl is not None and step_stats_base is not None:
-            plot_waits_comparison(
-                step_stats_rl['avg_wait'], step_stats_base['avg_wait'], 
-                comparison_plot_path
-            )
-
-        print("-" * (29 + len(experiment)) + "\n")
-
-if __name__ == "__main__":
-    main()
+        if res_rl[5] and res_base[5]:
+            # Generate the 4 new plots
+            plot_cumulative_waiting_time(res_rl[5]['total_wait'], res_base[5]['total_wait'], 
+                                         os.path.join(RESULTS_DIR, experiment, f"eval_cumulative_wait{args.suffix}.png"))
+            plot_queue_length(res_rl[5]['queue_length'], res_base[5]['queue_length'], 
+                              os.path.join(RESULTS_DIR, experiment, f"eval_queue_length{args.suffix}.png"))
+            plot_waiting_time_distribution(res_rl[6], res_base[6], 
+                                          os.path.join(RESULTS_DIR, experiment, f"eval_wait_dist{args.suffix}.png"))
+            plot_phase_timeline(res_rl[5]['active_phase'], res_base[5]['active_phase'], 
+                                os.path.join(RESULTS_DIR, experiment, f"eval_phase_timeline{args.suffix}.png"))
+            print(f"Generated evaluation plots in {os.path.join(RESULTS_DIR, experiment)}")
 
 if __name__ == "__main__":
     main()
