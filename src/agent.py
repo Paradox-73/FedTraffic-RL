@@ -5,9 +5,10 @@ import torch.nn.functional as F
 import numpy as np
 from collections import deque
 import random
+import config
 
 class TrafficLightDQN(nn.Module):
-    def __init__(self, state_dim=11, action_dim=4):
+    def __init__(self, state_dim=18, action_dim=4):
         super(TrafficLightDQN, self).__init__()
         self.fc1 = nn.Linear(state_dim, 128)
         self.fc2 = nn.Linear(128, 128)
@@ -19,10 +20,10 @@ class TrafficLightDQN(nn.Module):
         return self.fc3(x)
 
 class TrafficLightAgent:
-    def __init__(self, state_dim=15, action_dim=4, device="cpu", lr=1e-4, gamma=0.98, batch_size=64, memory_size=10000):
-        self.device = device
-        self.gamma = gamma
-        self.batch_size = batch_size
+    def __init__(self, state_dim=18, action_dim=4):
+        self.device = config.DEVICE
+        self.gamma = config.GAMMA
+        self.batch_size = config.BATCH_SIZE
         self.action_dim = action_dim
 
         self.model = TrafficLightDQN(state_dim, action_dim).to(self.device)
@@ -30,9 +31,9 @@ class TrafficLightAgent:
         self.target_model.load_state_dict(self.model.state_dict())
         self.target_model.eval()
 
-        self.optimizer = optim.Adam(self.model.parameters(), lr=5e-5) # Lower LR for stability
-        self.memory = deque(maxlen=memory_size)
-        self.loss_fn = nn.HuberLoss() # Better at handling the "spiky" rewards of Stage 3
+        self.optimizer = optim.Adam(self.model.parameters(), lr=config.LEARNING_RATE)
+        self.memory = deque(maxlen=config.MEMORY_SIZE)
+        self.loss_fn = nn.HuberLoss()
 
     def select_action(self, state, epsilon):
         if random.random() < epsilon:
