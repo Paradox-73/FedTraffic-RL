@@ -11,7 +11,7 @@ YELLOW_TIME = 3
 ACTION_COMMIT_TIME = 10
 
 # --- Spawning Configuration ---
-BURST_COUNT = 25
+BURST_COUNT = 5
 PERIOD = 12
 
 # --- DQN Hyperparameters ---

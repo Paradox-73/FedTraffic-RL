@@ -29,8 +29,9 @@ def generate_routes(experiment_name, output_path):
 """
     flows = ""
     total_vehicles = 0
-    routes = ["NS", "SN", "EW", "WE", "NE",
-              "NW", "SE", "SW", "EN", "ES", "WN", "WS"]
+    routes = ["NS", "SN", "EW", "WE",
+              "NW", "SE", "EN", "WN",
+              "NE", "SW", "ES", "WS",]
 
     if "burst_spawn" in experiment_name:
         # Stage 1: Spawn a fixed, large number of vehicles all at once at begin="0"
