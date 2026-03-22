@@ -24,8 +24,8 @@ EPSILON_DECAY = 0.995
 EPSILON_MIN = 0.01
 
 # --- Reward Weights ---
-W1 = 1.0  # Throughput weight (cars passed)
-W2 = 1.0  # Congestion penalty weight (halting cars)
+W1 = 20.0  # Throughput weight (cars passed) - Increased to provide stronger signal
+W2 = 1.0   # Congestion penalty weight (halting cars)
 
 # --- Traffic Phase Definitions ---
 PHASE_N_GREEN = 0

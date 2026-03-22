@@ -18,35 +18,33 @@ DEVICE = config.DEVICE
 
 
 def get_state(last_phase_time, current_phase):
-    q_north = np.clip(traci.edge.getLastStepHaltingNumber(
-        "edge_N_in") / 20.0, 0, 1)
-    q_south = np.clip(traci.edge.getLastStepHaltingNumber(
-        "edge_S_in") / 20.0, 0, 1)
-    q_east = np.clip(traci.edge.getLastStepHaltingNumber(
-        "edge_E_in") / 20.0, 0, 1)
-    q_west = np.clip(traci.edge.getLastStepHaltingNumber(
-        "edge_W_in") / 20.0, 0, 1)
+    # State Dim = 18
+    # 1. QUEUES (Normalized by total possible cars in burst)
+    q_north = np.clip(traci.edge.getLastStepHaltingNumber("edge_N_in") / 60.0, 0, 1)
+    q_south = np.clip(traci.edge.getLastStepHaltingNumber("edge_S_in") / 60.0, 0, 1)
+    q_east = np.clip(traci.edge.getLastStepHaltingNumber("edge_E_in") / 60.0, 0, 1)
+    q_west = np.clip(traci.edge.getLastStepHaltingNumber("edge_W_in") / 60.0, 0, 1)
 
-    wait_north = np.clip(traci.edge.getWaitingTime("edge_N_in") / 100.0, 0, 1)
-    wait_south = np.clip(traci.edge.getWaitingTime("edge_S_in") / 100.0, 0, 1)
-    wait_east = np.clip(traci.edge.getWaitingTime("edge_E_in") / 100.0, 0, 1)
-    wait_west = np.clip(traci.edge.getWaitingTime("edge_W_in") / 100.0, 0, 1)
+    # 2. WAITS (Normalized by max expected wait time per edge)
+    wait_north = np.clip(traci.edge.getWaitingTime("edge_N_in") / 2000.0, 0, 1)
+    wait_south = np.clip(traci.edge.getWaitingTime("edge_S_in") / 2000.0, 0, 1)
+    wait_east = np.clip(traci.edge.getWaitingTime("edge_E_in") / 2000.0, 0, 1)
+    wait_west = np.clip(traci.edge.getWaitingTime("edge_W_in") / 2000.0, 0, 1)
 
+    # 3. PHASE CONTEXT (One-Hot Encoding)
     is_n = 1 if current_phase == config.PHASE_N_GREEN else 0
     is_e = 1 if current_phase == config.PHASE_E_GREEN else 0
     is_s = 1 if current_phase == config.PHASE_S_GREEN else 0
     is_w = 1 if current_phase == config.PHASE_W_GREEN else 0
 
+    # How long has it been green?
     norm_last_phase_time = np.clip(last_phase_time / 150.0, 0, 1)
 
-    pressure_north = np.clip((traci.edge.getLastStepVehicleNumber(
-        "edge_N_in") - traci.edge.getLastStepVehicleNumber("edge_S_out")) / 20.0, -1, 1)
-    pressure_south = np.clip((traci.edge.getLastStepVehicleNumber(
-        "edge_S_in") - traci.edge.getLastStepVehicleNumber("edge_N_out")) / 20.0, -1, 1)
-    pressure_east = np.clip((traci.edge.getLastStepVehicleNumber(
-        "edge_E_in") - traci.edge.getLastStepVehicleNumber("edge_W_out")) / 20.0, -1, 1)
-    pressure_west = np.clip((traci.edge.getLastStepVehicleNumber(
-        "edge_W_in") - traci.edge.getLastStepVehicleNumber("edge_E_out")) / 20.0, -1, 1)
+    # 4. PRESSURE (Difference in vehicle counts)
+    pressure_north = np.clip((traci.edge.getLastStepVehicleNumber("edge_N_in") - traci.edge.getLastStepVehicleNumber("edge_S_out")) / 60.0, -1, 1)
+    pressure_south = np.clip((traci.edge.getLastStepVehicleNumber("edge_S_in") - traci.edge.getLastStepVehicleNumber("edge_N_out")) / 60.0, -1, 1)
+    pressure_east = np.clip((traci.edge.getLastStepVehicleNumber("edge_E_in") - traci.edge.getLastStepVehicleNumber("edge_W_out")) / 60.0, -1, 1)
+    pressure_west = np.clip((traci.edge.getLastStepVehicleNumber("edge_W_in") - traci.edge.getLastStepVehicleNumber("edge_E_out")) / 60.0, -1, 1)
 
     return np.array([q_north, q_south, q_east, q_west,
                      wait_north, wait_south, wait_east, wait_west,

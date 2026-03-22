@@ -21,48 +21,57 @@ print("Using device:", DEVICE)
 class Logger:
     def __init__(self, log_dir, experiment_name):
         self.terminal = sys.stdout
-        self.log_dir = os.path.join(log_dir, experiment_name)
-        os.makedirs(self.log_dir, exist_ok=True)
+        self.base_log_dir = os.path.join(log_dir, experiment_name)
+        os.makedirs(self.base_log_dir, exist_ok=True)
+        
         run_num = 1
-        while os.path.exists(os.path.join(self.log_dir, f"run_{run_num}.log")):
+        while os.path.exists(os.path.join(self.base_log_dir, f"run_{run_num}")):
             run_num += 1
-        self.log_file_path = os.path.join(self.log_dir, f"run_{run_num}.log")
-        self.log = open(self.log_file_path, "w", encoding="utf-8")
+        self.run_dir = os.path.join(self.base_log_dir, f"run_{run_num}")
+        os.makedirs(self.run_dir, exist_ok=True)
+        
+        self.log_file = None
         self.original_stdout = sys.stdout
         self.original_stderr = sys.stderr
 
-    def start(self):
-        print(f"Terminal output also saved to: {self.log_file_path}")
+    def set_log_file(self, filename):
+        if self.log_file:
+            self.log_file.close()
+        log_path = os.path.join(self.run_dir, filename)
+        self.log_file = open(log_path, "w", encoding="utf-8")
         sys.stdout = self
         sys.stderr = self
 
     def stop(self):
         sys.stdout = self.original_stdout
         sys.stderr = self.original_stderr
-        self.log.close()
+        if self.log_file:
+            self.log_file.close()
 
     def write(self, message):
         self.terminal.write(message)
-        self.log.write(message)
+        if self.log_file:
+            self.log_file.write(message)
 
     def flush(self):
         self.terminal.flush()
-        self.log.flush()
+        if self.log_file:
+            self.log_file.flush()
 
 # --- State Function ---
 def get_state(last_phase_time, current_phase):
     # State Dim = 18
-    # 1. QUEUES
-    q_north = np.clip(traci.edge.getLastStepHaltingNumber("edge_N_in") / 20.0, 0, 1)
-    q_south = np.clip(traci.edge.getLastStepHaltingNumber("edge_S_in") / 20.0, 0, 1)
-    q_east = np.clip(traci.edge.getLastStepHaltingNumber("edge_E_in") / 20.0, 0, 1)
-    q_west = np.clip(traci.edge.getLastStepHaltingNumber("edge_W_in") / 20.0, 0, 1)
+    # 1. QUEUES (Normalized by total possible cars in burst)
+    q_north = np.clip(traci.edge.getLastStepHaltingNumber("edge_N_in") / 60.0, 0, 1)
+    q_south = np.clip(traci.edge.getLastStepHaltingNumber("edge_S_in") / 60.0, 0, 1)
+    q_east = np.clip(traci.edge.getLastStepHaltingNumber("edge_E_in") / 60.0, 0, 1)
+    q_west = np.clip(traci.edge.getLastStepHaltingNumber("edge_W_in") / 60.0, 0, 1)
 
-    # 2. WAITS
-    wait_north = np.clip(traci.edge.getWaitingTime("edge_N_in") / 100.0, 0, 1)
-    wait_south = np.clip(traci.edge.getWaitingTime("edge_S_in") / 100.0, 0, 1)
-    wait_east = np.clip(traci.edge.getWaitingTime("edge_E_in") / 100.0, 0, 1)
-    wait_west = np.clip(traci.edge.getWaitingTime("edge_W_in") / 100.0, 0, 1)
+    # 2. WAITS (Normalized by max expected wait time per edge)
+    wait_north = np.clip(traci.edge.getWaitingTime("edge_N_in") / 2000.0, 0, 1)
+    wait_south = np.clip(traci.edge.getWaitingTime("edge_S_in") / 2000.0, 0, 1)
+    wait_east = np.clip(traci.edge.getWaitingTime("edge_E_in") / 2000.0, 0, 1)
+    wait_west = np.clip(traci.edge.getWaitingTime("edge_W_in") / 2000.0, 0, 1)
 
     # 3. PHASE CONTEXT (One-Hot Encoding)
     is_n = 1 if current_phase == config.PHASE_N_GREEN else 0
@@ -73,11 +82,11 @@ def get_state(last_phase_time, current_phase):
     # How long has it been green?
     norm_last_phase_time = np.clip(last_phase_time / 150.0, 0, 1)
 
-    # 4. PRESSURE
-    pressure_north = np.clip((traci.edge.getLastStepVehicleNumber("edge_N_in") - traci.edge.getLastStepVehicleNumber("edge_S_out")) / 20.0, -1, 1)
-    pressure_south = np.clip((traci.edge.getLastStepVehicleNumber("edge_S_in") - traci.edge.getLastStepVehicleNumber("edge_N_out")) / 20.0, -1, 1)
-    pressure_east = np.clip((traci.edge.getLastStepVehicleNumber("edge_E_in") - traci.edge.getLastStepVehicleNumber("edge_W_out")) / 20.0, -1, 1)
-    pressure_west = np.clip((traci.edge.getLastStepVehicleNumber("edge_W_in") - traci.edge.getLastStepVehicleNumber("edge_E_out")) / 20.0, -1, 1)
+    # 4. PRESSURE (Difference in vehicle counts)
+    pressure_north = np.clip((traci.edge.getLastStepVehicleNumber("edge_N_in") - traci.edge.getLastStepVehicleNumber("edge_S_out")) / 60.0, -1, 1)
+    pressure_south = np.clip((traci.edge.getLastStepVehicleNumber("edge_S_in") - traci.edge.getLastStepVehicleNumber("edge_N_out")) / 60.0, -1, 1)
+    pressure_east = np.clip((traci.edge.getLastStepVehicleNumber("edge_E_in") - traci.edge.getLastStepVehicleNumber("edge_W_out")) / 60.0, -1, 1)
+    pressure_west = np.clip((traci.edge.getLastStepVehicleNumber("edge_W_in") - traci.edge.getLastStepVehicleNumber("edge_E_out")) / 60.0, -1, 1)
 
     return np.array([q_north, q_south, q_east, q_west,
                      wait_north, wait_south, wait_east, wait_west,
@@ -118,6 +127,52 @@ def plot_rewards(rewards, losses, save_path):
     plt.savefig(save_path)
     plt.close()
 
+def plot_step_metrics(step_data, save_path):
+    steps = [d['step'] for d in step_data]
+    waiting_times = [d['waiting_time'] for d in step_data]
+    flow_rates = [d['flow_rate'] for d in step_data]
+    halting_cars = [d['halting_cars'] for d in step_data]
+
+    plt.figure(figsize=(15, 10))
+
+    plt.subplot(3, 1, 1)
+    plt.plot(steps, waiting_times, label="Total Waiting Time (s)")
+    plt.ylabel("Waiting Time")
+    plt.legend()
+    plt.grid(True)
+    plt.title("Step-wise Metrics")
+
+    plt.subplot(3, 1, 2)
+    plt.plot(steps, flow_rates, label="Flow Rate (veh/step)", color='green')
+    plt.ylabel("Flow Rate")
+    plt.legend()
+    plt.grid(True)
+
+    plt.subplot(3, 1, 3)
+    plt.plot(steps, halting_cars, label="Halting Cars", color='red')
+    plt.xlabel("Step")
+    plt.ylabel("Halting Cars")
+    plt.legend()
+    plt.grid(True)
+
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+
+def collect_step_metrics(prev_outgoing_vehicles):
+    flow_count = 0
+    for edge in config.OUTGOING_EDGES:
+        current_vehicles = set(traci.edge.getLastStepVehicleIDs(edge))
+        new_vehicles = current_vehicles - prev_outgoing_vehicles[edge]
+        flow_count += len(new_vehicles)
+        prev_outgoing_vehicles[edge] = current_vehicles
+    
+    flow_rate = flow_count / 1.0 
+    halting_cars = sum(traci.edge.getLastStepHaltingNumber(edge) for edge in config.INCOMING_EDGES)
+    total_waiting_time = sum(traci.edge.getWaitingTime(edge) for edge in config.INCOMING_EDGES)
+    
+    return flow_rate, halting_cars, total_waiting_time, prev_outgoing_vehicles
+
 def get_stats_from_tripinfo(filepath):
     if not os.path.exists(filepath): return 0, 0, 0, 0, []
     tree = ET.parse(filepath)
@@ -149,7 +204,7 @@ def run(experiment_name, args):
     logs_dir = os.path.normpath(os.path.join(SCRIPT_DIR, "../logs"))
 
     logger = Logger(logs_dir, experiment_name)
-    logger.start()
+    logger.set_log_file("setup.log")
 
     try:
         if traci.isLoaded(): traci.close()
@@ -162,6 +217,7 @@ def run(experiment_name, args):
         epsilon = config.EPSILON_START
 
         for episode in range(config.NUM_OF_EPISODES):
+            logger.set_log_file(f"episode_{episode+1}.log")
             total_vehicles_in_sim = generate_routes(experiment_name, route_file_path)
             all_total_vehicles.append(total_vehicles_in_sim)
             time.sleep(0.1)
@@ -177,19 +233,26 @@ def run(experiment_name, args):
 
             # Initialize tracking for flow rate
             prev_outgoing_vehicles = {edge: set() for edge in config.OUTGOING_EDGES}
+            step_metrics_log = []
 
             while step < config.SIMULATION_TIME:
                 current_phase = traci.trafficlight.getPhase('J1')
 
                 if current_phase in config.YELLOW_PHASES.values():
                     traci.simulationStep()
-                    
-                    # Update tracking even during yellow to not miss vehicles
-                    for edge in config.OUTGOING_EDGES:
-                        prev_outgoing_vehicles[edge] = set(traci.edge.getLastStepVehicleIDs(edge))
-
                     step += 1
                     time_in_phase += 1
+                    
+                    flow_rate, halting_cars, total_waiting_time, prev_outgoing_vehicles = collect_step_metrics(prev_outgoing_vehicles)
+                    step_metrics_log.append({
+                        'step': step,
+                        'waiting_time': total_waiting_time,
+                        'flow_rate': flow_rate,
+                        'halting_cars': halting_cars
+                    })
+                    if not args.nogui:
+                        print(f"Step: {step} | Time: {traci.simulation.getTime():.1f} | Waiting: {total_waiting_time:7.2f} | Flow: {flow_rate:4.2f} | Halting: {halting_cars}")
+
                     if time_in_phase >= config.YELLOW_TIME:
                         traci.trafficlight.setPhase('J1', next_green_phase)
                         current_green_phase = next_green_phase
@@ -213,17 +276,16 @@ def run(experiment_name, args):
                 step += 1
                 time_in_phase += 1
 
-                # --- NEW REWARD LOGIC (Flow Rate vs Waiting Cars) ---
-                flow_count = 0
-                for edge in config.OUTGOING_EDGES:
-                    current_vehicles = set(traci.edge.getLastStepVehicleIDs(edge))
-                    new_vehicles = current_vehicles - prev_outgoing_vehicles[edge]
-                    flow_count += len(new_vehicles)
-                    prev_outgoing_vehicles[edge] = current_vehicles
-                
-                # Flow rate for this step (time = 1)
-                flow_rate = flow_count / 1.0 
-                halting_cars = sum(traci.edge.getLastStepHaltingNumber(edge) for edge in config.INCOMING_EDGES)
+                flow_rate, halting_cars, total_waiting_time, prev_outgoing_vehicles = collect_step_metrics(prev_outgoing_vehicles)
+                step_metrics_log.append({
+                    'step': step,
+                    'waiting_time': total_waiting_time,
+                    'flow_rate': flow_rate,
+                    'halting_cars': halting_cars
+                })
+                if not args.nogui:
+                    print(f"Step: {step} | Time: {traci.simulation.getTime():.1f} | Waiting: {total_waiting_time:7.2f} | Flow: {flow_rate:4.2f} | Halting: {halting_cars}")
+
                 reward = (config.W1 * flow_rate) - (config.W2 * halting_cars)
 
                 next_phase_id = traci.trafficlight.getPhase('J1')
@@ -236,6 +298,10 @@ def run(experiment_name, args):
                 episode_reward += reward
 
             traci.close()
+
+            # Plot step-wise metrics for the episode
+            step_plot_path = os.path.join(results_dir, f"step_metrics_{experiment_name}_epi_{episode+1}.png")
+            plot_step_metrics(step_metrics_log, step_plot_path)
 
             avg_wait, _, _, completed_vehicles, _ = get_stats_from_tripinfo(tripinfo_path)
             all_avg_wait_times.append(avg_wait)
