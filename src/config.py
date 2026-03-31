@@ -14,6 +14,8 @@ BASELINE_GREEN_TIME = 30
 # --- Spawning Configuration ---
 BURST_COUNT = 5
 PERIOD = 12
+HEAVY_PERIOD = 2   # High traffic
+LIGHT_PERIOD = 30  # Low traffic
 
 # --- DQN Hyperparameters ---
 LEARNING_RATE = 5e-5

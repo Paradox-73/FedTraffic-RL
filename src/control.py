@@ -339,7 +339,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.experiment == "all":
-        stages = ["burst_spawn", "periodic_uniform"]
+        stages = ["burst_spawn", "periodic_uniform", "one_heavy_three_light"]
         for stage in stages:
             print(f"\nSTARTING EXPERIMENT: {stage}")
             run(stage, args)

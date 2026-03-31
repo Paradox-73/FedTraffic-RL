@@ -48,6 +48,17 @@ def generate_routes(experiment_name, output_path):
             flows += f'<flow id="periodic_{r}" type="mixed_traffic" route="{r}" begin="0" end="{config.SIMULATION_TIME}" period="{config.PERIOD}"/>\n'
             total_vehicles += (config.SIMULATION_TIME // config.PERIOD)
 
+    elif "one_heavy_three_light" in experiment_name:
+        # 1 lane (North) has high traffic, others have low traffic
+        # Routes starting with 'N' are NS, NW, NE
+        for r in routes:
+            if r.startswith("N"):
+                period = config.HEAVY_PERIOD
+            else:
+                period = config.LIGHT_PERIOD
+            flows += f'<flow id="asymmetric_{r}" type="mixed_traffic" route="{r}" begin="0" end="{config.SIMULATION_TIME}" period="{period}"/>\n'
+            total_vehicles += (config.SIMULATION_TIME // period)
+
     with open(output_path, "w") as f:
         f.write(header + flows + "</routes>")
 
