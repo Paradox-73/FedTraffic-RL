@@ -9,13 +9,25 @@ from agent import TrafficLightAgent
 from generate_routes import generate_routes
 import xml.etree.ElementTree as ET
 import config
+from collections import deque
 
 # --- Configuration ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEVICE = config.DEVICE
 
-# --- State Function ---
+# In get_state or collect_stats
+def get_junction_queue(edge_id):
+    # Only count vehicles within 50m of the end of the edge that are halting
+    halting_at_junction = 0
+    vehicles = traci.edge.getLastStepVehicleIDs(edge_id)
+    for v in vehicles:
+        dist_to_junction = traci.edge.getLaneNumber(edge_id) # Simplify for logic
+        # getDistance() or lane position is more accurate
+        if traci.vehicle.getLanePosition(v) > 440 and traci.vehicle.getSpeed(v) < 0.1:
+            halting_at_junction += 1
+    return halting_at_junction
 
+# --- State Function ---
 
 def get_state(last_phase_time, current_phase):
     # State Dim = 18
@@ -85,11 +97,12 @@ def run_evaluation(experiment_name, model_path, nogui, use_baseline=False, tripi
 
     cumulative_reward = 0
     cumulative_completed = 0
-    step_stats = {'total_wait': [], 'queue_length': [], 'active_phase': [
-    ], 'completed': [], 'cumulative_reward': [], 'step_reward': []}
+    step_stats = {'total_wait': [], 'queue_length': [], 'active_phase': [],
+                  'completed': [], 'cumulative_reward': [], 'step_reward': [], 'flow_rate': []}
 
     # Initialize tracking for flow rate
     prev_outgoing_vehicles = {edge: set() for edge in config.OUTGOING_EDGES}
+    flow_window = deque(maxlen=10)  # For smoothing flow rate over last 3 steps
 
     def collect_stats():
         nonlocal cumulative_completed, cumulative_reward
@@ -104,10 +117,13 @@ def run_evaluation(experiment_name, model_path, nogui, use_baseline=False, tripi
 
         # Flow rate for this step (time = 1)
         flow_rate = flow_count / 1.0
-        halting_cars = sum(traci.edge.getLastStepHaltingNumber(e)
-                           for e in config.INCOMING_EDGES)
+        flow_window.append(flow_rate)
+        windowed_flow_rate = sum(flow_window) / len(flow_window)
 
-        step_reward = (config.W1 * flow_rate) - (config.W2 * halting_cars)
+        halting_cars = sum(get_junction_queue(edge)
+                           for edge in config.INCOMING_EDGES)
+
+        step_reward = (config.W1 * windowed_flow_rate) - (config.W2 * halting_cars)
         cumulative_reward += step_reward
         cumulative_completed += flow_count
 
@@ -118,7 +134,7 @@ def run_evaluation(experiment_name, model_path, nogui, use_baseline=False, tripi
         step_stats['completed'].append(cumulative_completed)
         step_stats['cumulative_reward'].append(cumulative_reward)
         step_stats['step_reward'].append(step_reward)
-        step_stats['flow_rate'] = flow_rate
+        step_stats['flow_rate'].append(windowed_flow_rate)
 
     try:
         if traci.isLoaded():
@@ -129,12 +145,26 @@ def run_evaluation(experiment_name, model_path, nogui, use_baseline=False, tripi
         time_in_phase = 0
         current_green_phase = traci.trafficlight.getPhase('J1')
 
+        print("Baseline Green Phase Time: {}s | Yellow Phase Time: {}s".format(
+            config.BASELINE_GREEN_TIME, config.YELLOW_TIME))
+
         while step < config.SIMULATION_TIME:
+            
+            # CHANING COLOR BASED ON SPEED
+            for veh_id in traci.vehicle.getIDList():
+                # Speed < 0.1 m/s is typically considered halted in SUMO
+                if traci.vehicle.getSpeed(veh_id) < 0.1:
+                    # Set to Red (R, G, B, A)
+                    traci.vehicle.setColor(veh_id, (255, 0, 0, 255)) 
+                else:
+                    # Reset to your default Yellow defined in the vType
+                    traci.vehicle.setColor(veh_id, (255, 255, 0, 255))
+
             if use_baseline:
                 # Baseline logic (Fixed-Time)
                 current_phase_id = traci.trafficlight.getPhase('J1')
                 if current_phase_id in config.GREEN_PHASES:
-                    if time_in_phase >= config.MIN_GREEN_TIME:
+                    if time_in_phase >= config.BASELINE_GREEN_TIME:
                         traci.trafficlight.setPhase(
                             'J1', config.YELLOW_PHASES[current_phase_id])
                         time_in_phase = 0
@@ -175,10 +205,11 @@ def run_evaluation(experiment_name, model_path, nogui, use_baseline=False, tripi
                     step += 1
                     time_in_phase += 1
 
-            print(f"===== step {step} =====")
-            collect_stats()
-            print(step_stats['total_wait'][-1],
-                  step_stats['queue_length'][-1], step_stats['flow_rate'])
+            # Use traci to get current phase for printing to avoid undefined errors
+            curr_phase = traci.trafficlight.getPhase('J1')
+            is_green = curr_phase % 2 == 0
+            phase_name = config.GREEN_PHASES_NAME[curr_phase // 2] if is_green else config.GREEN_PHASES_NAME[curr_phase // 2] + " Yellow"
+            print(f"Step {step} | Waiting Time: {step_stats['total_wait'][-1]:.2f} | Queue Length: {step_stats['queue_length'][-1]} | Flow Rate: {step_stats['flow_rate'][-1]:.2f} | Step Reward: {step_stats['step_reward'][-1]:.2f} | Phase: {phase_name} ({'Green' if is_green else 'Yellow'})")
 
         print("Simulation completed.")
 
@@ -288,6 +319,21 @@ def plot_phase_timeline(phases_rl, phases_base, save_path):
     plt.savefig(save_path)
     plt.close()
 
+def plot_flow_rate(flow_rl, flow_base, save_path):
+    """Plots the flow rate over time for both RL and Baseline."""
+    plt.figure(figsize=(10, 6))
+    plt.plot(flow_rl, label="RL Agent", color="blue", linewidth=2)
+    plt.plot(flow_base, label="Baseline", color="orange", linewidth=2, linestyle="--")
+    plt.xlabel("Simulation Step")
+    plt.ylabel("Flow Rate (Vehicles/Step)")
+    plt.title("Flow Rate Comparison (RL vs Baseline)")
+    plt.legend()
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+    print(f"Flow rate plot saved to: {save_path}")
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -304,40 +350,59 @@ def main():
     for exp in experiments:
         print(f"--- Evaluating Experiment: {exp} ---")
         model_dir = os.path.join(MODELS_DIR, exp)
-        model_files = [f for f in os.listdir(model_dir) if f.endswith('.pth')]
-        if not model_files:
-            print(f"No model found for {exp}, skipping.")
-            continue
-        model_path = os.path.join(model_dir, model_files[0])
+        
+        # Check if model directory and files exist
+        model_path = None
+        if os.path.exists(model_dir):
+            model_files = [f for f in os.listdir(model_dir) if f.endswith('.pth')]
+            if model_files:
+                model_path = os.path.join(model_dir, model_files[0])
+        
+        if not model_path:
+            print(f"No model folder or files found for {exp}, skipping RL evaluation.")
 
         trip_rl = os.path.join(RESULTS_DIR, exp, "trip_rl.xml")
         trip_base = os.path.join(RESULTS_DIR, exp, "trip_base.xml")
         os.makedirs(os.path.dirname(trip_rl), exist_ok=True)
 
-        generate_routes(exp, os.path.join(
-            SCRIPT_DIR, "../sumo_config/hello.rou.xml"))
+        # Handle missing route file
+        route_file = os.path.join(SCRIPT_DIR, "../sumo_config/hello.rou.xml")
+        if not os.path.exists(route_file):
+            print(f"Route file {route_file} missing. Generating new routes using generate_routes.py...")
+            generate_routes(exp, route_file)
+        else:
+            # We must regenerate for each experiment to ensure traffic matches the experiment type
+            generate_routes(exp, route_file)
 
-        # res_rl = run_evaluation(exp, model_path, args.nogui, False, trip_rl)
+        print(f"Running Baseline Evaluation for {exp}...")
         res_base = run_evaluation(exp, None, args.nogui, True, trip_base)
+        
         res_rl = res_base
+        if model_path:
+            print(f"Running RL Evaluation for {exp}...")
+            res_rl = run_evaluation(exp, model_path, args.nogui, False, trip_rl)
 
-        if res_rl[5] and res_base[5]:
-            # Generate the primary comparison plot
-            plot_evaluation_results(
-                res_rl, res_base, exp, os.path.join(RESULTS_DIR, exp))
+        if res_base and res_base[5]:
+            if res_rl and res_rl[5]:
+                # Generate comparison plots
+                plot_evaluation_results(
+                    res_rl, res_base, exp, os.path.join(RESULTS_DIR, exp))
 
-            # Generate additional analysis plots
-            plot_cumulative_waiting_time(res_rl[5]['total_wait'], res_base[5]['total_wait'],
-                                         os.path.join(RESULTS_DIR, exp, f"{exp}_eval_cumulative_wait.png"))
+                plot_cumulative_waiting_time(res_rl[5]['total_wait'], res_base[5]['total_wait'],
+                                             os.path.join(RESULTS_DIR, exp, f"{exp}_eval_cumulative_wait.png"))
 
-            plot_waiting_time_distribution(res_rl[6], res_base[6],
-                                           os.path.join(RESULTS_DIR, exp, f"{exp}_eval_wait_dist.png"))
+                plot_waiting_time_distribution(res_rl[6], res_base[6],
+                                               os.path.join(RESULTS_DIR, exp, f"{exp}_eval_wait_dist.png"))
 
-            plot_phase_timeline(res_rl[5]['active_phase'], res_base[5]['active_phase'],
-                                os.path.join(RESULTS_DIR, exp, f"{exp}_eval_phase_timeline.png"))
+                plot_phase_timeline(res_rl[5]['active_phase'], res_base[5]['active_phase'],
+                                    os.path.join(RESULTS_DIR, exp, f"{exp}_eval_phase_timeline.png"))
 
-            print(
-                f"Result for {exp}: RL Reward = {res_rl[0]:.2f}, Baseline Reward = {res_base[0]:.2f}")
+                plot_flow_rate(res_rl[5]['flow_rate'], res_base[5]['flow_rate'],
+                               os.path.join(RESULTS_DIR, exp, f"{exp}_eval_flow_rate.png"))
+
+                print(f"Result for {exp}: RL Reward = {res_rl[0]:.2f}, Baseline Reward = {res_base[0]:.2f}")
+            else:
+                print(f"Result for {exp}: Baseline Reward = {res_base[0]:.2f} (RL skipped)")
 
 
 if __name__ == "__main__":

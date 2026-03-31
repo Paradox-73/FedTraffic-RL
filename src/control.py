@@ -11,6 +11,7 @@ import random
 import time
 import xml.etree.ElementTree as ET
 import config
+from collections import deque
 
 # --- Configuration ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -234,6 +235,7 @@ def run(experiment_name, args):
             # Initialize tracking for flow rate
             prev_outgoing_vehicles = {edge: set() for edge in config.OUTGOING_EDGES}
             step_metrics_log = []
+            flow_window = deque(maxlen=10)
 
             while step < config.SIMULATION_TIME:
                 current_phase = traci.trafficlight.getPhase('J1')
@@ -244,6 +246,9 @@ def run(experiment_name, args):
                     time_in_phase += 1
                     
                     flow_rate, halting_cars, total_waiting_time, prev_outgoing_vehicles = collect_step_metrics(prev_outgoing_vehicles)
+                    flow_window.append(flow_rate)
+                    smoothed_flow = sum(flow_window) / len(flow_window)
+
                     step_metrics_log.append({
                         'step': step,
                         'waiting_time': total_waiting_time,
@@ -251,7 +256,7 @@ def run(experiment_name, args):
                         'halting_cars': halting_cars
                     })
                     if not args.nogui:
-                        print(f"Step: {step} | Time: {traci.simulation.getTime():.1f} | Waiting: {total_waiting_time:7.2f} | Flow: {flow_rate:4.2f} | Halting: {halting_cars}")
+                        print(f"Step: {step} | Time: {traci.simulation.getTime():.1f} | Waiting: {total_waiting_time:7.2f} | Smoothed Flow: {smoothed_flow:4.2f} | Halting: {halting_cars}")
 
                     if time_in_phase >= config.YELLOW_TIME:
                         traci.trafficlight.setPhase('J1', next_green_phase)
@@ -277,16 +282,19 @@ def run(experiment_name, args):
                 time_in_phase += 1
 
                 flow_rate, halting_cars, total_waiting_time, prev_outgoing_vehicles = collect_step_metrics(prev_outgoing_vehicles)
+                flow_window.append(flow_rate)
+                smoothed_flow = sum(flow_window) / len(flow_window)
+
                 step_metrics_log.append({
                     'step': step,
                     'waiting_time': total_waiting_time,
                     'flow_rate': flow_rate,
                     'halting_cars': halting_cars
                 })
-                if not args.nogui:
-                    print(f"Step: {step} | Time: {traci.simulation.getTime():.1f} | Waiting: {total_waiting_time:7.2f} | Flow: {flow_rate:4.2f} | Halting: {halting_cars}")
 
-                reward = (config.W1 * flow_rate) - (config.W2 * halting_cars)
+                print(f"Step: {step} | Time: {traci.simulation.getTime():.1f} | Waiting: {total_waiting_time:7.2f} | Smoothed Flow: {smoothed_flow:4.2f} | Halting: {halting_cars}")
+
+                reward = (config.W1 * smoothed_flow) - (config.W2 * halting_cars)
 
                 next_phase_id = traci.trafficlight.getPhase('J1')
                 next_state = get_state(time_in_phase, next_phase_id)

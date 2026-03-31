@@ -4,11 +4,12 @@ import torch
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # --- Simulation Constants ---
-SIMULATION_TIME = 1000  # Total steps per episode
+SIMULATION_TIME = 500  # Total steps per episode
 NUM_OF_EPISODES = 200
 MIN_GREEN_TIME = 10
 YELLOW_TIME = 3
 ACTION_COMMIT_TIME = 10
+BASELINE_GREEN_TIME = 30
 
 # --- Spawning Configuration ---
 BURST_COUNT = 5
@@ -24,7 +25,8 @@ EPSILON_DECAY = 0.995
 EPSILON_MIN = 0.01
 
 # --- Reward Weights ---
-W1 = 20.0  # Throughput weight (cars passed) - Increased to provide stronger signal
+# Throughput weight (cars passed) - Increased to provide stronger signal
+W1 = 20.0
 W2 = 1.0   # Congestion penalty weight (halting cars)
 
 # --- Traffic Phase Definitions ---
@@ -38,6 +40,7 @@ PHASE_W_GREEN = 6
 PHASE_W_YELLOW = 7
 
 GREEN_PHASES = [PHASE_N_GREEN, PHASE_E_GREEN, PHASE_S_GREEN, PHASE_W_GREEN]
+GREEN_PHASES_NAME = ["North", "East", "South", "West"]
 YELLOW_PHASES = {
     PHASE_N_GREEN: PHASE_N_YELLOW,
     PHASE_E_GREEN: PHASE_E_YELLOW,
