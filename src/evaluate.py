@@ -349,7 +349,7 @@ def main():
 
     for exp in experiments:
         print(f"--- Evaluating Experiment: {exp} ---")
-        model_dir = os.path.join(MODELS_DIR, exp)
+        model_dir = os.path.join(MODELS_DIR)
         
         # Check if model directory and files exist
         model_path = None

@@ -4,8 +4,8 @@ import torch
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # --- Simulation Constants ---
-SIMULATION_TIME = 500  # Total steps per episode
-NUM_OF_EPISODES = 200
+SIMULATION_TIME = 1000  # Total steps per episode
+NUM_OF_EPISODES = 500
 MIN_GREEN_TIME = 10
 YELLOW_TIME = 3
 ACTION_COMMIT_TIME = 10
