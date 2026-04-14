@@ -1,0 +1,7 @@
+bias different lanes
+
+penalize green time (have a maximum time)
+
+literature survey on this setting
+
+modify the report to a research paper oriented
