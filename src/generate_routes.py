@@ -2,7 +2,7 @@ import random
 import config
 
 
-def generate_routes(experiment_name, output_path):
+def generate_routes(experiment_name, output_path, bias_lane=None):
     """
     Generates deterministic traffic flows for two stages:
     1. burst_spawn: High volume at t=0.
@@ -49,10 +49,16 @@ def generate_routes(experiment_name, output_path):
             total_vehicles += (config.SIMULATION_TIME // config.PERIOD)
 
     elif "one_heavy_three_light" in experiment_name:
-        # 1 lane (North) has high traffic, others have low traffic
-        # Routes starting with 'N' are NS, NW, NE
+        # One lane has high traffic, others have low traffic.
+        # Rotating heavy lane if bias_lane is provided
+        lane_map = {0: "N", 1: "E", 2: "S", 3: "W"}
+        heavy_lane = bias_lane if bias_lane is not None else "N"
+        if isinstance(heavy_lane, int):
+            heavy_lane = lane_map.get(heavy_lane, "N")
+            
+        print(f"Generating routes with heavy lane: {heavy_lane}")
         for r in routes:
-            if r.startswith("N"):
+            if r.startswith(heavy_lane):
                 period = config.HEAVY_PERIOD
             else:
                 period = config.LIGHT_PERIOD

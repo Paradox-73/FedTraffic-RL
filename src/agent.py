@@ -8,7 +8,7 @@ import random
 import config
 
 class TrafficLightDQN(nn.Module):
-    def __init__(self, state_dim=18, action_dim=4):
+    def __init__(self, state_dim=22, action_dim=4):  # 22 = 18 original + 4 starvation
         super(TrafficLightDQN, self).__init__()
         self.fc1 = nn.Linear(state_dim, 128)
         self.fc2 = nn.Linear(128, 128)
@@ -20,7 +20,7 @@ class TrafficLightDQN(nn.Module):
         return self.fc3(x)
 
 class TrafficLightAgent:
-    def __init__(self, state_dim=18, action_dim=4):
+    def __init__(self, state_dim=22, action_dim=4):  # 22 = 18 original + 4 starvation
         self.device = config.DEVICE
         self.gamma = config.GAMMA
         self.batch_size = config.BATCH_SIZE

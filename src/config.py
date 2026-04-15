@@ -4,8 +4,8 @@ import torch
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # --- Simulation Constants ---
-SIMULATION_TIME = 1000  # Total steps per episode
-NUM_OF_EPISODES = 500
+SIMULATION_TIME = 1000
+NUM_OF_EPISODES = 200
 MIN_GREEN_TIME = 10
 YELLOW_TIME = 3
 ACTION_COMMIT_TIME = 10
@@ -14,8 +14,8 @@ BASELINE_GREEN_TIME = 30
 # --- Spawning Configuration ---
 BURST_COUNT = 5
 PERIOD = 12
-HEAVY_PERIOD = 2   # High traffic
-LIGHT_PERIOD = 30  # Low traffic
+HEAVY_PERIOD = 2
+LIGHT_PERIOD = 30
 
 # --- DQN Hyperparameters ---
 LEARNING_RATE = 5e-5
@@ -27,9 +27,16 @@ EPSILON_DECAY = 0.995
 EPSILON_MIN = 0.01
 
 # --- Reward Weights ---
-# Throughput weight (cars passed) - Increased to provide stronger signal
-W1 = 20.0
-W2 = 1.0   # Congestion penalty weight (halting cars)
+W1 = 20.0  # Throughput weight
+W2 = 1.0   # Congestion penalty weight
+W3 = 3.0   # Starvation penalty weight (punish ignoring lanes)
+
+# --- Starvation Config ---
+# Normalization ceiling: steps beyond this = fully starved (clipped to 1.0)
+STARVATION_NORM = 1
+# Mix a periodic_uniform episode into one_heavy_three_light training every N episodes
+# so the agent sees uniform traffic during training
+MIX_UNIFORM_EVERY_N = 4
 
 # --- Traffic Phase Definitions ---
 PHASE_N_GREEN = 0

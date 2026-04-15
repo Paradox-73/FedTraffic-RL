@@ -17,53 +17,53 @@ DEVICE = config.DEVICE
 
 # In get_state or collect_stats
 def get_junction_queue(edge_id):
-    # Only count vehicles within 50m of the end of the edge that are halting
-    halting_at_junction = 0
-    vehicles = traci.edge.getLastStepVehicleIDs(edge_id)
-    for v in vehicles:
-        dist_to_junction = traci.edge.getLaneNumber(edge_id) # Simplify for logic
-        # getDistance() or lane position is more accurate
-        if traci.vehicle.getLanePosition(v) > 440 and traci.vehicle.getSpeed(v) < 0.1:
-            halting_at_junction += 1
-    return halting_at_junction
+    # Count all vehicles halted on the edge
+    return traci.edge.getLastStepHaltingNumber(edge_id)
 
 # --- State Function ---
 
-def get_state(last_phase_time, current_phase):
-    # State Dim = 18
-    # 1. QUEUES (Normalized by total possible cars in burst)
+def get_state(last_phase_time, current_phase, time_since_green):
+    # State Dim = 22
+    # 1. QUEUES 
     q_north = np.clip(traci.edge.getLastStepHaltingNumber("edge_N_in") / 60.0, 0, 1)
     q_south = np.clip(traci.edge.getLastStepHaltingNumber("edge_S_in") / 60.0, 0, 1)
     q_east = np.clip(traci.edge.getLastStepHaltingNumber("edge_E_in") / 60.0, 0, 1)
     q_west = np.clip(traci.edge.getLastStepHaltingNumber("edge_W_in") / 60.0, 0, 1)
 
-    # 2. WAITS (Normalized by max expected wait time per edge)
+    # 2. WAITS
     wait_north = np.clip(traci.edge.getWaitingTime("edge_N_in") / 2000.0, 0, 1)
     wait_south = np.clip(traci.edge.getWaitingTime("edge_S_in") / 2000.0, 0, 1)
     wait_east = np.clip(traci.edge.getWaitingTime("edge_E_in") / 2000.0, 0, 1)
     wait_west = np.clip(traci.edge.getWaitingTime("edge_W_in") / 2000.0, 0, 1)
 
-    # 3. PHASE CONTEXT (One-Hot Encoding)
+    # 3. PHASE CONTEXT
     is_n = 1 if current_phase == config.PHASE_N_GREEN else 0
     is_e = 1 if current_phase == config.PHASE_E_GREEN else 0
     is_s = 1 if current_phase == config.PHASE_S_GREEN else 0
     is_w = 1 if current_phase == config.PHASE_W_GREEN else 0
 
-    # How long has it been green?
+    # 4. TIME IN PHASE
     norm_last_phase_time = np.clip(last_phase_time / 150.0, 0, 1)
 
-    # 4. PRESSURE (Difference in vehicle counts)
+    # 5. PRESSURE
     pressure_north = np.clip((traci.edge.getLastStepVehicleNumber("edge_N_in") - traci.edge.getLastStepVehicleNumber("edge_S_out")) / 60.0, -1, 1)
     pressure_south = np.clip((traci.edge.getLastStepVehicleNumber("edge_S_in") - traci.edge.getLastStepVehicleNumber("edge_N_out")) / 60.0, -1, 1)
     pressure_east = np.clip((traci.edge.getLastStepVehicleNumber("edge_E_in") - traci.edge.getLastStepVehicleNumber("edge_W_out")) / 60.0, -1, 1)
     pressure_west = np.clip((traci.edge.getLastStepVehicleNumber("edge_W_in") - traci.edge.getLastStepVehicleNumber("edge_E_out")) / 60.0, -1, 1)
+
+    # 6. STARVATION (The missing 4 parameters)
+    starve_n = np.clip(time_since_green[config.PHASE_N_GREEN] / config.STARVATION_NORM, 0, 1)
+    starve_e = np.clip(time_since_green[config.PHASE_E_GREEN] / config.STARVATION_NORM, 0, 1)
+    starve_s = np.clip(time_since_green[config.PHASE_S_GREEN] / config.STARVATION_NORM, 0, 1)
+    starve_w = np.clip(time_since_green[config.PHASE_W_GREEN] / config.STARVATION_NORM, 0, 1)
 
     return np.array([q_north, q_south, q_east, q_west,
                      wait_north, wait_south, wait_east, wait_west,
                      is_n, is_e, is_s, is_w,
                      norm_last_phase_time,
                      pressure_north, pressure_south, pressure_east, pressure_west,
-                     1.0])
+                     1.0,
+                     starve_n, starve_e, starve_s, starve_w], dtype=np.float32)
 
 
 def get_stats_from_tripinfo(filepath):
@@ -84,15 +84,14 @@ def run_evaluation(experiment_name, model_path, nogui, use_baseline=False, tripi
     sumo_cfg_path = os.path.join(sumo_config_base, "hello.sumocfg")
     sumo_bin = "sumo" if nogui else "sumo-gui"
     sumo_cmd = [sumo_bin, "-c", sumo_cfg_path,
-                "--delay", "100",
+                # "--delay", "100",
                 "--start", "--quit-on-end",
                 "--no-warnings", "--no-step-log", "--tripinfo-output", tripinfo_path]
 
     agent = None
     if not use_baseline:
-        agent = TrafficLightAgent(state_dim=18, action_dim=4)
-        agent.model.load_state_dict(
-            torch.load(model_path, map_location=DEVICE))
+        agent = TrafficLightAgent(state_dim=22, action_dim=4)
+        agent.model.load_state_dict(torch.load(model_path, map_location=DEVICE))
         agent.model.eval()
 
     cumulative_reward = 0
@@ -107,7 +106,7 @@ def run_evaluation(experiment_name, model_path, nogui, use_baseline=False, tripi
     def collect_stats():
         nonlocal cumulative_completed, cumulative_reward
 
-        # --- NEW REWARD LOGIC (Flow Rate vs Waiting Cars) ---
+        # --- REWARD LOGIC (Flow Rate vs Waiting Cars vs Starvation) ---
         flow_count = 0
         for edge in config.OUTGOING_EDGES:
             current_vehicles = set(traci.edge.getLastStepVehicleIDs(edge))
@@ -123,7 +122,14 @@ def run_evaluation(experiment_name, model_path, nogui, use_baseline=False, tripi
         halting_cars = sum(get_junction_queue(edge)
                            for edge in config.INCOMING_EDGES)
 
-        step_reward = (config.W1 * windowed_flow_rate) - (config.W2 * halting_cars)
+        # Calculate starvation penalty to match control.py
+        starvation_penalty = sum(
+            time_since_green[p]
+            for p in config.GREEN_PHASES
+            if p != current_green_phase
+        ) / config.STARVATION_NORM
+
+        step_reward = (config.W1 * windowed_flow_rate) - (config.W2 * halting_cars) - (config.W3 * starvation_penalty)
         cumulative_reward += step_reward
         cumulative_completed += flow_count
 
@@ -145,10 +151,20 @@ def run_evaluation(experiment_name, model_path, nogui, use_baseline=False, tripi
         time_in_phase = 0
         current_green_phase = traci.trafficlight.getPhase('J1')
 
+        # Initialize time_since_green at the start of the evaluation episode
+        time_since_green = {p: 0 for p in config.GREEN_PHASES}
+
         print("Baseline Green Phase Time: {}s | Yellow Phase Time: {}s".format(
             config.BASELINE_GREEN_TIME, config.YELLOW_TIME))
 
         while step < config.SIMULATION_TIME:
+
+            # Update time_since_green every step
+            for p in config.GREEN_PHASES:
+                if p == current_green_phase:
+                    time_since_green[p] = 0
+                else:
+                    time_since_green[p] += 1
             
             # CHANING COLOR BASED ON SPEED
             for veh_id in traci.vehicle.getIDList():
@@ -180,7 +196,8 @@ def run_evaluation(experiment_name, model_path, nogui, use_baseline=False, tripi
                 step += 1
                 time_in_phase += 1
             else:
-                state = get_state(time_in_phase, current_green_phase)
+                # Call get_state with the new signature
+                state = get_state(time_in_phase, current_green_phase, time_since_green)
                 action = agent.select_action(state, epsilon=0.0)
                 chosen_phase = config.GREEN_PHASES[action]
 
@@ -339,6 +356,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--experiment", type=str, default="burst_spawn")
     parser.add_argument("--nogui", action="store_true")
+    parser.add_argument("--model", type=str, default=None)
     args = parser.parse_args()
 
     MODELS_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, "../models"))
@@ -352,14 +370,20 @@ def main():
         model_dir = os.path.join(MODELS_DIR)
         
         # Check if model directory and files exist
-        model_path = None
-        if os.path.exists(model_dir):
+        model_path = args.model
+        if (not os.path.exists(model_path)):
+            print("Model path provided does not exist", model_path)
+            return
+
+        if not model_path and os.path.exists(model_dir):
             model_files = [f for f in os.listdir(model_dir) if f.endswith('.pth')]
             if model_files:
                 model_path = os.path.join(model_dir, model_files[0])
         
         if not model_path:
             print(f"No model folder or files found for {exp}, skipping RL evaluation.")
+        else:
+            print(f"Found model, path: {model_path}")
 
         trip_rl = os.path.join(RESULTS_DIR, exp, "trip_rl.xml")
         trip_base = os.path.join(RESULTS_DIR, exp, "trip_base.xml")
@@ -369,10 +393,11 @@ def main():
         route_file = os.path.join(SCRIPT_DIR, "../sumo_config/hello.rou.xml")
         if not os.path.exists(route_file):
             print(f"Route file {route_file} missing. Generating new routes using generate_routes.py...")
-            generate_routes(exp, route_file)
+            generate_routes(exp, route_file, bias_lane=0)
         else:
             # We must regenerate for each experiment to ensure traffic matches the experiment type
-            generate_routes(exp, route_file)
+            # Defaulting to North (0) for evaluation, but could be randomized
+            generate_routes(exp, route_file, bias_lane=0)
 
         print(f"Running Baseline Evaluation for {exp}...")
         res_base = run_evaluation(exp, None, args.nogui, True, trip_base)
