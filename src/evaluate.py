@@ -10,6 +10,7 @@ from generate_routes import generate_routes
 import xml.etree.ElementTree as ET
 import config
 from collections import deque
+from export_utils import save_to_csv
 
 # --- Configuration ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -424,6 +425,21 @@ def main():
 
                 plot_flow_rate(res_rl[5]['flow_rate'], res_base[5]['flow_rate'],
                                os.path.join(RESULTS_DIR, exp, f"{exp}_eval_flow_rate.png"))
+
+                # Export to CSV for pgfplots
+                eval_csv_path = os.path.join(RESULTS_DIR, exp, f"{exp}_evaluation_metrics.csv")
+                csv_data = {
+                    'step': list(range(len(res_rl[5]['cumulative_reward']))),
+                    'rl_reward': res_rl[5]['cumulative_reward'],
+                    'base_reward': res_base[5]['cumulative_reward'],
+                    'rl_queue': res_rl[5]['queue_length'],
+                    'base_queue': res_base[5]['queue_length'],
+                    'rl_wait': res_rl[5]['total_wait'],
+                    'base_wait': res_base[5]['total_wait'],
+                    'rl_flow': res_rl[5]['flow_rate'],
+                    'base_flow': res_base[5]['flow_rate']
+                }
+                save_to_csv(csv_data, eval_csv_path)
 
                 print(f"Result for {exp}: RL Reward = {res_rl[0]:.2f}, Baseline Reward = {res_base[0]:.2f}")
             else:

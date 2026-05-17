@@ -12,6 +12,7 @@ import time
 import xml.etree.ElementTree as ET
 import config
 from collections import deque
+from export_utils import save_to_csv
 
 # --- Configuration ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -402,6 +403,11 @@ def run(experiment_name, args):
             step_plot_path = os.path.join(
                 results_dir, f"step_metrics_{experiment_name}_epi_{episode+1}.png")
             plot_step_metrics(step_metrics_log, step_plot_path)
+            
+            # Export step metrics to CSV
+            step_csv_path = os.path.join(
+                results_dir, f"step_metrics_{experiment_name}_epi_{episode+1}.csv")
+            save_to_csv(step_metrics_log, step_csv_path)
 
             avg_wait, _, _, completed_vehicles, _ = get_stats_from_tripinfo(tripinfo_path)
             all_avg_wait_times.append(avg_wait)
@@ -422,6 +428,18 @@ def run(experiment_name, args):
 
         torch.save(agent.model.state_dict(), model_path)
         plot_rewards(all_rewards, all_avg_losses, plot_path)
+        
+        # Export training progress to CSV
+        progress_csv_path = os.path.join(results_dir, f"training_progress_{experiment_name}.csv")
+        progress_data = {
+            'episode': list(range(1, config.NUM_OF_EPISODES + 1)),
+            'reward': all_rewards,
+            'avg_loss': all_avg_losses,
+            'avg_wait': all_avg_wait_times,
+            'completed_vehicles': all_completed_vehicles,
+            'total_vehicles': all_total_vehicles
+        }
+        save_to_csv(progress_data, progress_csv_path)
 
     except Exception as e:
         print(f"Fatal error: {e}")
