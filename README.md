@@ -2,6 +2,10 @@
 
 This project implements a Deep Q-Network (DQN) agent to optimize traffic light timings at a four-way intersection using the **SUMO (Simulation of Urban MObility)** environment. The agent aims to maximize traffic flow while minimizing congestion and waiting times through adaptive phase switching.
 
+![SUMO simulation of the four-way intersection](docs/images/sumo_intersection.png)
+
+*The simulated intersection in `sumo-gui` (`one_heavy_three_light` scenario, t = 300 s). Halted vehicles are shown in red and moving vehicles in yellow; the coloured bars at the stop lines show the current signal state.*
+
 ## 🚀 Key Features
 
 - **Deep Q-Learning:** Implements a DQN agent with Experience Replay and a Target Network for stable training.
